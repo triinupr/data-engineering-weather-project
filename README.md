@@ -1,75 +1,180 @@
-# data-engineering-weather-project
 # Weather Forecast Accuracy – Data Engineering Project
 
-This project collects weather forecast and observation data from the
-Estonian Environment Agency for analysing weather forecast accuracy.
-It is group project for UT Data Engienering course.
+This project collects weather forecast and observation data from the Estonian Environment Agency for analysing weather forecast accuracy. It is a group project for the University of Tartu Data Engineering course.
 
-Team members:
-* Gailin Savi
-* Eliise Ševtšenko
-* Karoliine Inselberg
-* Triinu Prants 
+## Team members
 
+- Gailin Savi
+- Eliise Ševtšenko
+- Karoliine Inselberg
+- Triinu Prants
 
-Data source:
-Estonian Environment Agency Weather Service
+## Data sources
+
+- Estonian Weather Service live forecast XML
+- Estonian Weather Service live observations XML
+- Environment Portal validated historical hourly climate data
+
+Raw source data is preserved before later parsing and transformation.
 
 ## Requirements
 
-Run Docker Desktop.
+1. Install and run Docker Desktop.
+2. Install Git if it is not already installed.
+3. No local Python installation is required.
 
 ## Initial setup
 
-Clone the repository:
+Clone the repository and enter it:
 
     git clone <REPOSITORY-URL>
-    cd <REPOSITORY-NAME>
+    cd data-engineering-weather-project
 
-Build the Docker image:
+Build the Docker images:
 
     docker compose build
 
-## Collect forecast data manually
+## Manual live-ingestion test
 
-Run:
+These commands are useful for checking that data retrieval works without Airflow.
+
+### Forecast
 
     docker compose run --rm ingestion python src/ingest.py forecast
 
-The downloaded XML file will appear in:
+The XML appears in:
 
     data/raw/forecasts/
 
-## Collect observation data manually
-
-Run:
+### Observations
 
     docker compose run --rm ingestion python src/ingest.py observations
 
-The downloaded XML file will appear in:
+The XML appears in:
 
     data/raw/observations/
 
-## Verify that ingestion works
-
-Run:
+Verify the files:
 
     ls data/raw/forecasts
     ls data/raw/observations
 
-Both directories should contain timestamped XML files.
+## Historical observations - one-time batch load
 
-## Data collection schedule
+Historical observations are a bootstrap dataset and are intentionally **not** an Airflow recurring task. The command uses the Environment Portal's official `f_kliima_tund` hourly climate-data service by default.
 
-Forecast:
-- retrieved once per day
+The service has a response-size limit, so the script automatically downloads the selected month in pages and preserves each page as a separate raw JSON response.
 
-Observations:
-- retrieved once per hour
+Download one month, for example September 2026:
 
-Historical observations:
-- loaded separately as an initial batch
+    docker compose run --rm ingestion python src/ingest.py historical --year 2026 --month 9
 
-## Important
+The raw files appear under:
 
-Files under `data/raw/` are not committed to GitHub.
+    data/raw/historical_observations/2026_09/
+
+Repeat the command for each additional month that the project needs. Existing historical raw files are never overwritten.
+
+If the official service URL changes, it can be overridden explicitly:
+
+    docker compose run --rm -e HISTORICAL_OBSERVATIONS_URL=<URL> ingestion python src/ingest.py historical --year 2026 --month 9
+
+## Automatic data collection with Airflow
+
+Airflow runs two independent schedules:
+
+- observations: every hour at minute 5;
+- forecast: every day at 13:00 Estonia time (`Europe/Tallinn`).
+
+Historical observations are not scheduled.
+
+### 1. Make sure Docker Desktop is running
+
+Open Docker Desktop and wait until it reports that Docker is running.
+
+### 2. Build the images
+
+From the repository root:
+
+    docker compose build
+
+### 3. Initialize Airflow
+
+Run this once when setting up the project for the first time:
+
+    docker compose up airflow-init
+
+Wait until it finishes successfully and returns to the terminal prompt.
+
+### 4. Start automatic collection
+
+    docker compose up -d postgres airflow-webserver airflow-scheduler
+
+Check that the services are running:
+
+    docker compose ps
+
+### 5. Open Airflow
+
+Open this address in a browser:
+
+    http://localhost:8080
+
+Login for this local course environment:
+
+- username: `admin`
+- password: `admin`
+
+You should see:
+
+- `weather_observations_hourly`
+- `weather_forecast_daily`
+
+The DAGs are configured to be active when created. If either appears paused in the UI, switch it on.
+
+### 6. Check that collection works
+
+You can trigger either DAG manually from the Airflow UI instead of waiting for its next scheduled time.
+
+Then check:
+
+    ls data/raw/forecasts
+    ls data/raw/observations
+
+### 7. View status and logs
+
+Show container status:
+
+    docker compose ps
+
+Follow scheduler logs:
+
+    docker compose logs -f airflow-scheduler
+
+Follow webserver logs:
+
+    docker compose logs -f airflow-webserver
+
+Press `Ctrl+C` to stop following logs. This does not stop the containers.
+
+### 8. Stop automatic collection
+
+    docker compose down
+
+This stops the containers but does **not** delete the collected raw weather data or the named Airflow/PostgreSQL volumes.
+
+Do not use `docker compose down -v` unless you intentionally want to delete the Airflow/PostgreSQL state.
+
+## Important limitation of local scheduling
+
+Automatic collection only runs while the computer is on and Docker Desktop and the Airflow containers are running. If the laptop is asleep or switched off, the scheduled retrieval will not happen. `catchup` is disabled because a live XML endpoint cannot recreate a forecast or observation snapshot that was missed in the past.
+
+For reliable long-running collection, the same setup should eventually run on an always-on machine/server.
+
+## Raw-data directories
+
+    data/raw/forecasts/
+    data/raw/observations/
+    data/raw/historical_observations/
+
+Files under `data/raw/` are intentionally excluded from Git and should not be committed to GitHub.

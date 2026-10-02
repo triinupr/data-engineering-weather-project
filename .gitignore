@@ -1,4 +1,7 @@
 data/raw/
+data/raw/historical_observations/
+airflow-logs/
+postgres-data/
 .DS_Store
 __pycache__/
 *.pyc
