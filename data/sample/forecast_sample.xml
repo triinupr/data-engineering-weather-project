@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<forecasts>
+	<forecast date="2026-10-03">
+		<night>
+			<phenomenon>Fog</phenomenon>
+			<tempmin>2</tempmin>
+			<tempmax>13</tempmax>
+			<text>Clear or slightly cloudy. Dry. Fog in many places. Mainly southerly wind 1-6, on islands and western coast in gusts to 9 m/s. Air temperature 2..7, near the ground is falling locally arond 0, on coast to 13°C.</text>
+			<place>
+				<name>Harku</name>
+				<phenomenon>Fog</phenomenon>
+				<tempmin>7</tempmin>
+			</place>
+			<place>
+				<name>Jõhvi</name>
+				<phenomenon>Fog</phenomenon>
+				<tempmin>6</tempmin>
+			</place>
+			<place>
+				<name>Tartu</name>
+				<phenomenon>Fog</phenomenon>
+				<tempmin>5</tempmin>
+			</place>
+			<place>
+				<name>Pärnu</name>
+				<phenomenon>Fog</phenomenon>
+				<tempmin>7</tempmin>
+			</place>
+			<place>
+				<name>Kuressaare</name>
+				<phenomenon>Mist</phenomenon>
+				<tempmin>13</tempmin>
+			</place>
+			<place>
+				<name>Türi</name>
+				<phenomenon>Fog</phenomenon>
+				<tempmin>4</tempmin>
+			</place>
+			<wind>
+				<name>Kuusiku</name>
+				<direction>Southeast wind</direction>
+				<speedmin>1</speedmin>
+				<speedmax>5</speedmax>
+				<gust></gust>
+			</wind>
+			<wind>
+				<name>Väike-Maarja</name>
+				<direction>Southwest wind</direction>
+				<speedmin>1</speedmin>
+				<speedmax>4</speedmax>
+				<gust></gust>
+			</wind>
+			<wind>
+				<name>Võrtsjärv</name>
+				<direction>Southerly winds</direction>
+				<speedmin>1</speedmin>
+				<speedmax>5</speedmax>
+				<gust></gust>
+			</wind>
+			<sea>Forecast for Baltic Sea valid 24 hours from 13:00 UTC Oct 2 to 13:00 UTC Oct 3, 2026.
+
+No warnings
+
+Weather summary: today northwestern edge of weakening High over Baltic Sea, at night moving from Scandinavia to Sea trough of Low and leaving by day eastwards.
+
+Northern Baltic: southerly, in morning veering to westerly 4-10 m/s. From night isolated showers. Visibility from good to moderate.
+
+Western Gulf of Finland, Northern Gulf of Riga, Vainameri: southerly 3-9 m/s, after midday veering gradually to westerly. Dry, tomorrow by day isolated showers. At night fog locally, otherwise visibility from good to moderate.
+
+Eastern Gulf of Finland: variable 1-6 m/s, after midnight mainly southerly 3-9 m/s. Dry. At night fog locally, otherwise visibility from good to moderate.
+</sea>
+			<peipsi>Mainly southerly wind 1-5 m/s. Wave height up to 0.3 m. Dry, in many places fog. Visibility moderate or poor. Air temperature 5..9°C.</peipsi>
+		</night>
+		<day>
+			<phenomenon>Variable clouds</phenomenon>
+			<tempmin>14</tempmin>
+			<tempmax>18</tempmax>
+			<text>Variable clouds. Isolated rain showers, by morning fog remains in many places . Wind is veering gradually from southerly to westerly 2-8, on islands and western coast up to 10 m/s. Air temperature 14..18°C. 
+
+</text>
+			<place>
+				<name>Harku</name>
+				<phenomenon>Light shower</phenomenon>
+				<tempmax>16</tempmax>
+			</place>
+			<place>
+				<name>Jõhvi</name>
+				<phenomenon>Few clouds</phenomenon>
+				<tempmax>15</tempmax>
+			</place>
+			<place>
+				<name>Tartu</name>
+				<phenomenon>Mist</phenomenon>
+				<tempmax>17</tempmax>
+			</place>
+			<place>
+				<name>Pärnu</name>
+				<phenomenon>Cloudy with clear spells</phenomenon>
+				<tempmax>16</tempmax>
+			</place>
+			<place>
+				<name>Kuressaare</name>
+				<phenomenon>Variable clouds</phenomenon>
+				<tempmax>16</tempmax>
+			</place>
+			<place>
+				<name>Türi</name>
+				<phenomenon>Cloudy with clear spells</phenomenon>
+				<tempmax>16</tempmax>
+			</place>
+			<wind>
+				<name>Kuusiku</name>
+				<direction>Southwest wind</direction>
+				<speedmin>3</speedmin>
+				<speedmax>8</speedmax>
+				<gust></gust>
+			</wind>
+			<wind>
+				<name>Väike-Maarja</name>
+				<direction>Southwest wind</direction>
+				<speedmin>2</speedmin>
+				<speedmax>7</speedmax>
+				<gust></gust>
+			</wind>
+			<wind>
+				<name>Võrtsjärv</name>
+				<direction>South wind</direction>
+				<speedmin>2</speedmin>
+				<speedmax>7</speedmax>
+				<gust></gust>
+			</wind>
+			<sea></sea>
+			<peipsi>Southerly, in evening westerly wind 2-7 m/s. Wave height 0.2-0.6 m. Mostly dry, during morning fog patches. Visibility from good to moderate, in fog poor. Air temperature 13..15°C.</peipsi>
+		</day>
+	</forecast>
+	<forecast date="2026-10-04">
+		<night>
+			<phenomenon>Mist</phenomenon>
+			<tempmin>5</tempmin>
+			<tempmax>14</tempmax>
+			<text>Slightly and partly cloudy. Fog and drizzle locally. Southwest, west wind 1-7 m/s. Air temperature 5..10, on coast to 14°C.  </text>
+		</night>
+		<day>
+			<phenomenon>Light shower</phenomenon>
+			<tempmin>14</tempmin>
+			<tempmax>17</tempmax>
+			<text>Variable cloudy. A narrow belt of rain is moving from northwestern part to southeast. Southwest, west wind 3-9, on coast in gusts to 13 m/s. Air temperatuure 14..17°C. </text>
+		</day>
+	</forecast>
+	<forecast date="2026-10-05">
+		<night>
+			<phenomenon>Light shower</phenomenon>
+			<tempmin>5</tempmin>
+			<tempmax>13</tempmax>
+			<text>Slightly and partly cloudy. Locally some rain. Westerly wind 3-9, towards morning on coast in gusts 15 m/s. Air temperature 5..10, on coast to 13°C.</text>
+		</night>
+		<day>
+			<phenomenon>Moderate shower</phenomenon>
+			<tempmin>12</tempmin>
+			<tempmax>15</tempmax>
+			<text>From west it is getting cloudy. In forenoon locally, in afternoon in many places rain at times. Southwest 7-13, on coast in gusts to 18 m/s, in the evening decreasing. Air temperature 12..15°C.</text>
+		</day>
+	</forecast>
+	<forecast date="2026-10-06">
+		<night>
+			<phenomenon>Moderate rain</phenomenon>
+			<tempmin>8</tempmin>
+			<tempmax>14</tempmax>
+			<text>Overcast and rainy. Southwest, west wind 7-11, in gusts to 14, on coast 10-15, in gusts to 20 m/s. Air temperatuure 8..14°C. </text>
+		</night>
+		<day>
+			<phenomenon>Moderate shower</phenomenon>
+			<tempmin>14</tempmin>
+			<tempmax>17</tempmax>
+			<text>The cloudiness is reducing. In forenoon rain in many places, in afternoon dry. West, northwest, in forenoon in mainland southwest too 7-11, in gusts 14, on coast 10-15, in gusts to 20 m/s, in afternoon decreasing. Air temperatuure 14..17°C. </text>
+		</day>
+	</forecast>
+</forecasts>
