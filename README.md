@@ -17,6 +17,19 @@ This project collects weather forecast and observation data from the Estonian En
 
 Raw source data is preserved before later parsing and transformation.
 
+## Sample data
+
+The repository contains example responses from the Estonian Environment
+
+Agency Weather Service under `data/sample/`.
+- `forecast_sample.xml` – example daily forecast XML response.
+- `observations_sample.xml` – example weather station observation XML response.
+
+These files demonstrate the structure of the source datasets and can be
+used for development and testing without retrieving new data.
+Continuously collected raw data is stored under `data/raw/` and is not
+committed to GitHub.
+
 ## Requirements
 
 1. Install and run Docker Desktop.
