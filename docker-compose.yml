@@ -1,0 +1,5 @@
+services:
+  ingestion:
+    build: .
+    volumes:
+      - ./data:/app/data
