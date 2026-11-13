@@ -16,7 +16,8 @@ with DAG(
 ) as observations_dag:
     BashOperator(
         task_id="collect_observations",
-        bash_command="python /app/src/ingest.py observations",
+        # Pass Airflow execution date context dynamically
+        bash_command="python /app/src/ingest.py observations --date {{ ts_nodash }}",
     )
 
 with DAG(
@@ -29,5 +30,6 @@ with DAG(
 ) as forecast_dag:
     BashOperator(
         task_id="collect_forecast",
-        bash_command="python /app/src/ingest.py forecast",
+        # Pass Airflow execution date context dynamically
+        bash_command="python /app/src/ingest.py forecast --date {{ ds }}",
     )
