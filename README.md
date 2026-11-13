@@ -119,13 +119,19 @@ Run this once when setting up the project for the first time:
 
 Wait until it finishes successfully and returns to the terminal prompt.
 
-### 4. Start automatic collection
+### 4. Start automatic collection (postgreSQL, Airflow and pgAdmin in the backround)
 
-    docker compose up -d postgres airflow-webserver airflow-scheduler
+    docker compose up -d postgres airflow-webserver airflow-scheduler pgadmin
+
+Ensure container write permissions on the mounted `data/` volume (especially on Windows):
+
+    docker compose exec -u root airflow-webserver bash -c "mkdir -p /app/data/raw/forecasts /app/data/raw/observations /app/data/raw/historical_observations && chmod 
 
 Check that the services are running:
 
     docker compose ps
+* **Airflow Web UI:** [http://localhost:8080/](http://localhost:8080/) (`admin` / `admin`)
+* **pgAdmin Web UI:** [http://localhost:5051/](http://localhost:5051/) (`admin@example.com` / `admin`)
 
 ### 5. Open Airflow
 
@@ -191,3 +197,49 @@ For reliable long-running collection, the same setup should eventually run on an
     data/raw/historical_observations/
 
 Files under `data/raw/` are intentionally excluded from Git and should not be committed to GitHub.
+
+## Data Storage (PostgreSQL & Medallion Architecture)
+
+### Database Choice Rationale
+We selected **PostgreSQL (v16)** as the analytical data warehouse for this project for the following reasons:
+* **Native Semi-Structured Data Support:** The source APIs return raw payloads in both **XML** (forecasts and hourly observations) and **JSON** (historical observations). PostgreSQL natively supports `XML` and `JSONB` column types, allowing raw payloads to be stored unaltered in the Bronze layer and parsed directly in SQL/dbt using `xpath()` and JSONB functions.
+* **Medallion Architecture Separation:** PostgreSQL schemas cleanly separate data processing stages into `bronze` (raw payloads), `silver` (cleaned and parsed staging models), and `gold` (analytical star schema).
+* **Reliability & Ecosystem Integration:** PostgreSQL provides ACID-compliant transactions for idempotent batch loading (`ON CONFLICT DO NOTHING`) and integrates seamlessly with both **Apache Airflow** and **dbt** within a single Docker Compose stack.
+
+### Schema & Bronze Layer Structure
+The database (`airflow`) is organized into three schemas:
+* **`bronze`**: Stores raw, unmodified API responses along with ingestion metadata (`file_name`, `retrieved_at`).
+  * `bronze.raw_forecasts` (`raw_payload XML`) — weather forecast XML snapshots.
+  * `bronze.raw_observations` (`raw_payload XML`) — hourly station observation XML snapshots.
+  * `bronze.raw_historical_observations` (`raw_payload JSONB`) — paginated monthly historical climate JSON responses.
+* **`silver`**: Intermediate cleaned and structured models built via `dbt`.
+* **`gold`**: Final dimensional star schema (`Fact_ForecastAccuracy` and dimension tables) built via `dbt`.
+
+### Loading Raw Data into PostgreSQL
+Run the idempotent Bronze loader script to initialize the schemas/tables (if not yet created) and load all local files from `/app/data/raw/` into PostgreSQL:
+
+```bash
+docker compose exec airflow-webserver python /app/src/load_bronze.py
+```
+
+Already loaded files are safely skipped based on their unique `file_name`.
+
+---
+
+## Inspecting the Database (pgAdmin)
+
+1. Open [http://localhost:5051/](http://localhost:5051/) and log in (`admin@example.com` / `admin`).
+2. Select **Object → Register → Server** and configure the connection:
+   * **General → Name:** `weather-db`
+   * **Connection → Host name/address:** `postgres`
+   * **Connection → Port:** `5432`
+   * **Connection → Maintenance database:** `airflow`
+   * **Connection → Username / Password:** `airflow` / `airflow`
+3. Open **Query Tool** on the `airflow` database to verify loaded row counts:
+   ```sql
+   SELECT 'raw_forecasts' AS table_name, COUNT(*) AS rows FROM bronze.raw_forecasts
+   UNION ALL
+   SELECT 'raw_observations', COUNT(*) FROM bronze.raw_observations
+   UNION ALL
+   SELECT 'raw_historical_observations', COUNT(*) FROM bronze.raw_historical_observations;
+   ```
