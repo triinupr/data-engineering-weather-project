@@ -123,13 +123,15 @@ Wait until it finishes successfully and returns to the terminal prompt.
 
     docker compose up -d postgres airflow-webserver airflow-scheduler pgadmin
 
-Ensure container write permissions on the mounted `data/` volume (especially on Windows):
-
-    docker compose exec -u root airflow-webserver bash -c "mkdir -p /app/data/raw/forecasts /app/data/raw/observations /app/data/raw/historical_observations && chmod 
 
 Check that the services are running:
 
     docker compose ps
+    
+Ensure container write permissions on the mounted `data/` volume (especially on Windows):
+
+    docker compose exec -u root airflow-webserver bash -c "mkdir -p /app/data/raw/forecasts /app/data/raw/observations /app/data/raw/historical_observations && chmod 
+
 * **Airflow Web UI:** [http://localhost:8080/](http://localhost:8080/) (`admin` / `admin`)
 * **pgAdmin Web UI:** [http://localhost:5051/](http://localhost:5051/) (`admin@example.com` / `admin`)
 
