@@ -245,3 +245,8 @@ Already loaded files are safely skipped based on their unique `file_name`.
    UNION ALL
    SELECT 'raw_historical_observations', COUNT(*) FROM bronze.raw_historical_observations;
    ```
+
+## Assumptions for forecast accuracy calculations
+For this project, daytime is defined as 06:00–18:00 and nighttime as 18:00–06:00 (Estonian local time). The observed maximum temperature during the daytime period and minimum temperature during the nighttime period are compared with the corresponding forecast temperatures.
+
+These time intervals are project-specific assumptions and have not been verified against the official definitions used by the Estonian Weather Service. Therefore, the calculated forecast errors should be interpreted within the scope of these assumptions rather than as official forecast accuracy measurements.
