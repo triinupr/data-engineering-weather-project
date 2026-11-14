@@ -246,7 +246,159 @@ Already loaded files are safely skipped based on their unique `file_name`.
    SELECT 'raw_historical_observations', COUNT(*) FROM bronze.raw_historical_observations;
    ```
 
-## Assumptions for forecast accuracy calculations
+## Transformation (dbt)
+
+### Overview
+
+The Transformation layer is implemented using **dbt (data build tool)** and PostgreSQL. Its purpose is to transform raw weather forecast and observation data from the Bronze layer into structured tables suitable for analysing forecast accuracy.
+
+The transformation pipeline follows the Medallion Architecture:
+
+- **Bronze:** Raw XML weather forecasts and observations stored in PostgreSQL.
+- **Silver:** Parsed and cleaned weather data.
+- **Intermediate:** Prepared and aggregated data used by the final analytical models.
+- **Gold:** A dimensional star schema containing one fact table and five dimension tables.
+
+All transformations are defined as SQL models in the `dbt/weather_transformations/` directory. Dependencies between models are managed using dbt's `ref()` function.
+
+### Silver Layer
+
+The Silver layer contains two staging models:
+
+| Model | Description |
+|---|---|
+| `stg_forecasts` | Extracts and structures forecast information from the raw forecast XML data. |
+| `stg_observations` | Extracts and structures weather station measurements from the raw observation XML data. |
+
+### Intermediate Layer
+
+The intermediate layer contains three models:
+
+| Model | Description |
+|---|---|
+| `int_observations` | Prepares weather station observations for further processing. |
+| `int_daily_observations` | Aggregates observations into daily Day/Night periods for comparison with forecasts. |
+| `int_latest_forecasts` | Prepares forecast records for the analytical models. |
+
+For this project, daytime is defined as 06:00–18:00 and nighttime as 18:00–06:00 in Estonian local time. These are project-specific assumptions, as explained in the Assumptions section of this README.
+
+### Gold Layer – Star Schema
+
+The Gold layer contains the final analytical tables used for forecast accuracy analysis.
+
+**Fact table: `fact_forecast_accuracy`**
+
+This table combines weather forecasts with the corresponding weather station observations when available.
+
+Each row represents a weather forecast snapshot for a specific forecast date, Day/Night period and forecast location, linked to a mapped weather station and its aggregated observations when available.
+
+The fact table supports comparisons between forecasted and observed weather conditions.
+
+**Dimension tables:**
+
+| Dimension | Description |
+|---|---|
+| `dim_date` | Forecast dates and related date attributes. |
+| `dim_period` | Day and Night forecast periods. |
+| `dim_forecast_location` | Forecast locations. |
+| `dim_station` | Weather stations mapped to forecast locations. |
+| `dim_weather_phenomenon` | Weather phenomena included in the forecasts. |
+
+Together, the fact table and five dimensions form the analytical star schema.
+
+### Snapshot – Slowly Changing Dimension Type 2
+
+A dbt snapshot named `station_snapshot` is implemented to track changes in weather station information.
+
+The snapshot uses the dbt `check` strategy to detect changes in the `wmo_code` field.
+
+Snapshot history is used by `dim_station` to represent station records and their validity periods.
+
+### Data Quality Tests and Documentation
+
+Data quality tests are defined in the dbt project using YAML configuration files.
+
+The tests include checks for missing values, uniqueness and relationships between tables.
+
+During development, **31 dbt tests passed successfully**.
+
+Model and column documentation is provided in `models/marts/schema.yml`.
+
+### Running the Transformation Pipeline
+
+**The transformation models are not automatically executed by starting Docker Compose.**
+
+Before running dbt, PostgreSQL must be running and the Bronze tables must contain weather data.
+
+All commands below should be executed from the repository root directory.
+
+**Step 1 – Start the required services**
+
+If this is the first setup, follow the Docker build and Airflow initialization instructions earlier in this README.
+
+Start PostgreSQL and Airflow:
+
+```bash
+docker compose up -d postgres airflow-webserver airflow-scheduler pgadmin
+```
+
+**Step 2 – Collect weather data**
+
+If the local `data/raw/` directories are empty, retrieve forecast and observation data:
+
+```bash
+docker compose run --rm ingestion python src/ingest.py forecast
+docker compose run --rm ingestion python src/ingest.py observations
+```
+
+For meaningful forecast accuracy analysis, multiple forecast and observation snapshots are needed. A single collection run will not reproduce the historical dataset used during development.
+
+**Step 3 – Load raw data into PostgreSQL (Bronze)**
+
+```bash
+docker compose exec airflow-webserver python /app/src/load_bronze.py
+```
+
+This creates the necessary Bronze tables if they do not already exist and loads the locally available raw data. Previously loaded files are skipped.
+
+**Step 4 – Run the dbt snapshot**
+
+```bash
+docker compose run --rm dbt dbt snapshot --project-dir /app/dbt/weather_transformations
+```
+
+This creates or updates the station snapshot used for tracking changes in station information.
+
+**Step 5 – Run the dbt models**
+
+```bash
+docker compose run --rm dbt dbt run --project-dir /app/dbt/weather_transformations
+```
+
+This executes the dbt models in dependency order and creates or updates the Silver, Intermediate and Gold tables.
+
+**Step 6 – Run data quality tests**
+
+```bash
+docker compose run --rm dbt dbt test --project-dir /app/dbt/weather_transformations
+```
+
+The command checks whether the implemented data quality tests pass.
+
+### Verifying the Results
+
+The resulting tables can be inspected using pgAdmin at [http://localhost:5051/](http://localhost:5051/).
+
+The final fact table and dimensions are available in the `public_gold` schema.
+
+For example, the following SQL query returns the number of rows in the fact table:
+
+```sql
+SELECT COUNT(*)
+FROM public_gold.fact_forecast_accuracy;
+```
+
+### Assumptions for forecast accuracy calculations
 For this project, daytime is defined as 06:00–18:00 and nighttime as 18:00–06:00 (Estonian local time). The observed maximum temperature during the daytime period and minimum temperature during the nighttime period are compared with the corresponding forecast temperatures.
 
 These time intervals are project-specific assumptions and have not been verified against the official definitions used by the Estonian Weather Service. Therefore, the calculated forecast errors should be interpreted within the scope of these assumptions rather than as official forecast accuracy measurements.
