@@ -12,7 +12,7 @@ The implementation uses Python, Airflow 2.10.5, PostgreSQL 16 and dbt Core 1.10.
 | Estonian Weather Service observations XML | Hourly at minute 5, Europe/Tallinn | Live station observations and station metadata |
 | Environment Portal `f_kliima_tund` JSON | Manually triggered, one calendar month | Validated hourly air temperatures, metric `TA` |
 
-Raw XML files and complete JSON response pages are archived under `data/raw/` and excluded from Git. `data/sample/` contains the two original XML examples. The historical JSON integration is described in [docs/extra_credit_b.md](docs/extra_credit_b.md).
+Raw XML files and complete JSON response pages are archived under `data/raw/` and excluded from Git. `data/sample/` contains the two original XML examples.
 
 | Layer | PostgreSQL location | Contents |
 |---|---|---|
@@ -66,7 +66,7 @@ Keep the original backup. The supplied folder has 44 forecast XML files and 961 
 Trigger `weather_rebuild_from_raw` from the Airflow UI, or test it directly:
 
 ```bash
-docker compose exec airflow-scheduler airflow dags test weather_rebuild_from_raw 2026-11-21
+docker compose exec airflow-scheduler airflow dags test weather_rebuild_from_raw
 ```
 
 This loads Bronze, executes `dbt build` (snapshots, models and tests in dependency order), then generates dbt documentation. All three stages must succeed for the task to succeed.
@@ -200,7 +200,7 @@ Offline ingestion regression tests require Python 3.12 and `requests`:
 python3 -m unittest discover -s tests -v
 ```
 
-With Docker running and the raw archive restored, test replay and idempotency:
+With Docker running and the raw archive restored, test replay and idempotency. Pause the recurring collection DAGs during verification so incoming data does not change the row counts between replays:
 
 ```bash
 bash scripts/verify_pipeline.sh

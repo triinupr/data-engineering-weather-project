@@ -200,10 +200,18 @@ def ingest_historical(year: int, month: int):
             response = requests.get(
                 HISTORICAL_HOURLY_URL,
                 params={**params, "limit": page_size, "offset": (page_number - 1) * page_size},
-                headers={"Accept": "application/json", "Accept-Profile": "apijahialad"},
+                # Use the climate endpoint's default schema. The unrelated
+                # apijahialad profile causes PostgREST to reject this request.
+                headers={"Accept": "application/json"},
                 timeout=120,
             )
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except requests.HTTPError as exc:
+                raise ValueError(
+                    f"Historical API returned HTTP {response.status_code}: "
+                    f"{response.text[:500]}"
+                ) from exc
             try:
                 payload = response.json()
             except requests.JSONDecodeError as exc:

@@ -99,6 +99,23 @@ class IngestionTests(unittest.TestCase):
             query = get.call_args.kwargs["params"]
             self.assertEqual(query["element_kood"], "eq.TA")
 
+    def test_climate_request_does_not_force_an_unrelated_schema(self):
+        with patch.object(ingest.requests, "get", return_value=response([record()])) as get:
+            ingest.ingest_historical(2026, 10)
+        headers = get.call_args.kwargs["headers"]
+        self.assertEqual(headers["Accept"], "application/json")
+        self.assertNotIn("Accept-Profile", headers)
+
+    def test_api_error_includes_response_details_without_publishing(self):
+        error_response = response([])
+        error_response.status_code = 406
+        error_response.text = '{"message":"The requested schema is not exposed"}'
+        error_response.raise_for_status.side_effect = requests.HTTPError("Not Acceptable")
+        with patch.object(ingest.requests, "get", return_value=error_response):
+            with self.assertRaisesRegex(ValueError, "HTTP 406.*schema is not exposed"):
+                ingest.ingest_historical(2026, 10)
+        self.assertFalse((self.directory / "historical_observations/2026_10").exists())
+
     def test_empty_month_fails_instead_of_claiming_ingestion(self):
         with patch.object(ingest.requests, "get", return_value=response([])):
             with self.assertRaisesRegex(ValueError, "No validated TA"):
