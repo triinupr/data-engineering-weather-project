@@ -1,53 +1,19 @@
-WITH night_forecasts AS (
-    SELECT
-        file_name,
-        retrieved_at,
-        (xpath('//forecast/@date', raw_payload))[1]::text::date
-            AS forecast_date,
-        'Night' AS period,
-        (xpath('//forecast/night/phenomenon/text()', raw_payload))[1]::text
-            AS phenomenon_name,
-        unnest(xpath('//forecast/night/place', raw_payload)) AS place
-    FROM bronze.raw_forecasts
+with forecasts as (
+    select file_name, retrieved_at, unnest(xpath('//forecast', raw_payload)) as forecast_node
+    from {{ source('bronze', 'raw_forecasts') }}
 ),
-
-day_forecasts AS (
-    SELECT
-        file_name,
-        retrieved_at,
-        (xpath('//forecast/@date', raw_payload))[1]::text::date
-            AS forecast_date,
-        'Day' AS period,
-        (xpath('//forecast/day/phenomenon/text()', raw_payload))[1]::text
-            AS phenomenon_name,
-        unnest(xpath('//forecast/day/place', raw_payload)) AS place
-    FROM bronze.raw_forecasts
-),
-
-combined AS (
-    SELECT
-        file_name,
-        retrieved_at,
-        forecast_date,
-        period,
-        phenomenon_name,
-        (xpath('//name/text()', place))[1]::text AS location_name,
-        (xpath('//tempmin/text()', place))[1]::text::numeric
-            AS temperature
-    FROM night_forecasts
-
-    UNION ALL
-
-    SELECT
-        file_name,
-        retrieved_at,
-        forecast_date,
-        period,
-        phenomenon_name,
-        (xpath('//name/text()', place))[1]::text AS location_name,
-        (xpath('//tempmax/text()', place))[1]::text::numeric
-            AS temperature
-    FROM day_forecasts
+places as (
+    select file_name, retrieved_at,
+        (xpath('/forecast/@date', forecast_node))[1]::text::date as forecast_date,
+        p.period,
+        unnest(xpath('/forecast/' || lower(p.period) || '/place', forecast_node)) as place
+    from forecasts
+    cross join (values ('Day'), ('Night')) as p(period)
 )
-
-SELECT * FROM combined
+select file_name, retrieved_at, forecast_date, period,
+    -- Use each location's own phenomenon, not the regional summary.
+    nullif((xpath('/place/phenomenon/text()', place))[1]::text, '') as phenomenon_name,
+    (xpath('/place/name/text()', place))[1]::text as location_name,
+    nullif((xpath('/place/' || case when period = 'Day' then 'tempmax' else 'tempmin' end
+        || '/text()', place))[1]::text, '')::numeric as temperature
+from places

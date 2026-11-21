@@ -1,0 +1,312 @@
+unit_tests:
+- name: forecast_uses_place_phenomenon_and_its_date
+  model: stg_forecasts
+  given:
+  - input: source('bronze', 'raw_forecasts')
+    format: sql
+    fixture: forecast_places
+  expect:
+    rows:
+    - forecast_date: '2024-01-01'
+      period: Day
+      location_name: Harku
+      phenomenon_name: Light shower
+      temperature: 8
+    - forecast_date: '2024-01-02'
+      period: Day
+      location_name: Harku
+      phenomenon_name: Clear
+      temperature: 9
+- name: observation_preserves_rain_and_unknown_metrics
+  model: stg_observations
+  given:
+  - input: source('bronze', 'raw_observations')
+    format: sql
+    fixture: observation_metrics
+  expect:
+    rows:
+    - station_name: Wet
+      temperature: null
+      precipitation_mm: 0.5
+      phenomenon_name: Light rain
+    - station_name: Dry
+      temperature: 8
+      precipitation_mm: 0
+      phenomenon_name: Clear
+    - station_name: Unknown
+      temperature: 8
+      precipitation_mm: null
+      phenomenon_name: null
+- name: unified_retains_dst_hours_and_metric_provenance
+  model: int_unified_observations
+  given:
+  - input: ref('stg_observations')
+    format: sql
+    fixture: unified_live_hours
+  - input: ref('stg_historical_observations')
+    format: sql
+    fixture: unified_historical_hours
+  expect:
+    rows:
+    - station_name: Tallinn-Harku
+      observation_timestamp_utc: '2024-10-27T00:00:00Z'
+      temperature: 9
+      precipitation_mm: 0.2
+      observation_source: historical_json
+    - station_name: Tallinn-Harku
+      observation_timestamp_utc: '2024-10-27T01:00:00Z'
+      temperature: null
+      precipitation_mm: 0.2
+      observation_source: live_xml
+- name: period_uses_modal_weather_and_closing_rain_hour
+  model: int_daily_observations
+  given:
+  - input: ref('int_observations')
+    format: sql
+    fixture: period_full_day
+  expect:
+    rows:
+    - observation_date: '2024-01-01'
+      period: Day
+      actual_temperature: 12
+      actual_precipitation_mm: 3
+      observation_count: 12
+      precipitation_observation_count: 12
+      phenomenon_observation_count: 12
+      expected_observation_count: 12
+      observed_phenomenon: Overcast
+      observed_category: Cloudy
+- name: period_keeps_thirteen_hour_autumn_night
+  model: int_daily_observations
+  given:
+  - input: ref('int_observations')
+    format: sql
+    fixture: period_autumn_night
+  expect:
+    rows:
+    - observation_date: '2024-10-27'
+      period: Night
+      actual_temperature: 5
+      actual_precipitation_mm: 0
+      observation_count: 13
+      precipitation_observation_count: 13
+      phenomenon_observation_count: 13
+      expected_observation_count: 13
+      observed_phenomenon: Clear
+      observed_category: Clear
+- name: period_expects_eleven_hour_spring_night
+  model: int_daily_observations
+  given:
+  - input: ref('int_observations')
+    format: sql
+    fixture: period_spring_night
+  expect:
+    rows:
+    - observation_date: '2024-03-31'
+      period: Night
+      actual_temperature: 5
+      actual_precipitation_mm: 0
+      observation_count: 11
+      precipitation_observation_count: 11
+      phenomenon_observation_count: 11
+      expected_observation_count: 11
+      observed_phenomenon: Clear
+      observed_category: Clear
+- name: missing_weather_metrics_are_not_zero
+  model: int_daily_observations
+  given:
+  - input: ref('int_observations')
+    format: sql
+    fixture: period_missing_metrics
+  expect:
+    rows:
+    - observation_date: '2024-01-01'
+      period: Day
+      actual_temperature: 8
+      actual_precipitation_mm: null
+      observation_count: 12
+      precipitation_observation_count: 0
+      phenomenon_observation_count: 0
+      expected_observation_count: 12
+      observed_phenomenon: null
+      observed_category: null
+- name: forecast_timestamp_is_utc
+  model: int_latest_forecasts
+  given:
+  - input: ref('stg_forecasts')
+    rows:
+    - file_name: forecasts_20240331T030005Z_run_20240331T030000Z.xml
+      retrieved_at: '2024-04-01T00:00:00Z'
+      forecast_date: '2024-04-01'
+      period: Day
+      location_name: Harku
+      temperature: 10
+      phenomenon_name: Clear
+  expect:
+    rows:
+    - forecast_retrieved_at: '2024-03-31T03:00:05Z'
+      forecast_date: '2024-04-01'
+- name: season_uses_meteorological_months
+  model: dim_date
+  given:
+  - input: ref('stg_forecasts')
+    rows:
+    - forecast_date: '2024-01-01'
+    - forecast_date: '2024-04-01'
+    - forecast_date: '2024-07-01'
+    - forecast_date: '2024-10-01'
+  expect:
+    rows:
+    - full_date: '2024-01-01'
+      season: Winter
+    - full_date: '2024-04-01'
+      season: Spring
+    - full_date: '2024-07-01'
+      season: Summer
+    - full_date: '2024-10-01'
+      season: Autumn
+- name: fact_excludes_missing_partial_and_late_comparisons
+  model: fact_forecast_accuracy
+  given:
+  - input: ref('int_latest_forecasts')
+    rows:
+    - forecast_date: '2024-01-01'
+      period: Day
+      location_name: Harku
+      forecast_temperature: 10
+      forecast_phenomenon: Light rain
+      file_name: 2024-01-01_Day.xml
+      forecast_retrieved_at: '2023-12-31T00:00:00Z'
+    - forecast_date: '2024-01-01'
+      period: Night
+      location_name: Harku
+      forecast_temperature: 8
+      forecast_phenomenon: Clear
+      file_name: 2024-01-01_Night.xml
+      forecast_retrieved_at: '2023-12-31T00:00:00Z'
+    - forecast_date: '2024-01-02'
+      period: Day
+      location_name: Harku
+      forecast_temperature: 10
+      forecast_phenomenon: Light rain
+      file_name: 2024-01-02_Day.xml
+      forecast_retrieved_at: '2024-01-02T05:00:00Z'
+    - forecast_date: '2024-01-03'
+      period: Day
+      location_name: Harku
+      forecast_temperature: 10
+      forecast_phenomenon: Light rain
+      file_name: 2024-01-03_Day.xml
+      forecast_retrieved_at: '2024-01-02T00:00:00Z'
+    - forecast_date: '2024-01-04'
+      period: Day
+      location_name: Harku
+      forecast_temperature: 10
+      forecast_phenomenon: Clear
+      file_name: 2024-01-04_Day.xml
+      forecast_retrieved_at: '2024-01-03T00:00:00Z'
+  - input: ref('int_daily_observations')
+    format: sql
+    fixture: fact_periods
+  - input: ref('dim_date')
+    rows:
+    - date_key: 20240101
+      full_date: '2024-01-01'
+    - date_key: 20240102
+      full_date: '2024-01-02'
+    - date_key: 20240103
+      full_date: '2024-01-03'
+    - date_key: 20240104
+      full_date: '2024-01-04'
+  - input: ref('dim_period')
+    rows:
+    - period_key: 1
+      period_name: Day
+    - period_key: 2
+      period_name: Night
+  - input: ref('dim_forecast_location')
+    rows:
+    - location_key: 1
+      location_name: Harku
+  - input: ref('dim_station')
+    rows:
+    - station_key: 1
+      station_name: Tallinn-Harku
+      valid_from: '2020-01-01T00:00:00Z'
+      valid_to: null
+  - input: ref('dim_weather_phenomenon')
+    rows:
+    - phenomenon_key: 1
+      phenomenon_name: Light rain
+      category: Rain
+      has_precipitation: true
+    - phenomenon_key: 2
+      phenomenon_name: Overcast
+      category: Cloudy
+      has_precipitation: false
+    - phenomenon_key: 3
+      phenomenon_name: Clear
+      category: Clear
+      has_precipitation: false
+  expect:
+    rows:
+    - date_key: 20240101
+      period_key: 1
+      observed_temperature: 12
+      temperature_error: -2
+      absolute_error: 2
+      precipitation_match: false
+      phenomenon_match: false
+      observed_precipitation_mm: 0
+      observed_has_precipitation: false
+      is_temperature_eligible: true
+      is_precipitation_eligible: true
+      is_phenomenon_eligible: true
+    - date_key: 20240101
+      period_key: 2
+      observed_temperature: 5
+      temperature_error: 3
+      absolute_error: 3
+      precipitation_match: null
+      phenomenon_match: null
+      observed_precipitation_mm: null
+      observed_has_precipitation: null
+      is_temperature_eligible: true
+      is_precipitation_eligible: false
+      is_phenomenon_eligible: false
+    - date_key: 20240102
+      period_key: 1
+      observed_temperature: 13
+      temperature_error: null
+      absolute_error: null
+      precipitation_match: null
+      phenomenon_match: null
+      observed_precipitation_mm: 2
+      observed_has_precipitation: true
+      is_temperature_eligible: false
+      is_precipitation_eligible: false
+      is_phenomenon_eligible: false
+    - date_key: 20240103
+      period_key: 1
+      observed_temperature: null
+      temperature_error: null
+      absolute_error: null
+      precipitation_match: null
+      phenomenon_match: null
+      observed_precipitation_mm: null
+      observed_has_precipitation: null
+      is_temperature_eligible: false
+      is_precipitation_eligible: false
+      is_phenomenon_eligible: false
+    - date_key: 20240104
+      period_key: 1
+      observed_temperature: null
+      temperature_error: null
+      absolute_error: null
+      precipitation_match: null
+      phenomenon_match: null
+      observed_precipitation_mm: null
+      observed_has_precipitation: null
+      is_temperature_eligible: false
+      is_precipitation_eligible: false
+      is_phenomenon_eligible: false

@@ -1,21 +1,13 @@
-SELECT
-    observation_datetime,
-    station_name,
-    CASE
-        WHEN station_name = 'Tallinn-Harku' THEN 'Harku'
-        WHEN station_name = 'Tartu-Tõravere' THEN 'Tartu'
-        WHEN station_name = 'Kuressaare linn' THEN 'Kuressaare'
-        ELSE station_name
-    END AS location_name,
-    temperature,
-    phenomenon_name
-FROM {{ ref('int_unified_observations') }}
-WHERE station_name IN (
-    'Tallinn-Harku',
-    'Jõhvi',
-    'Tartu-Tõravere',
-    'Pärnu',
-    'Kuressaare linn',
-    'Türi'
+select observation_timestamp_utc, observation_datetime, station_name,
+    case
+        when station_name = 'Tallinn-Harku' then 'Harku'
+        when station_name = 'Tartu-Tõravere' then 'Tartu'
+        when station_name = 'Kuressaare linn' then 'Kuressaare'
+        else station_name
+    end as location_name,
+    temperature, phenomenon_name, precipitation_mm
+from {{ ref('int_unified_observations') }}
+where station_name in (
+    'Tallinn-Harku', 'Jõhvi', 'Tartu-Tõravere', 'Pärnu', 'Kuressaare linn', 'Türi'
 )
-AND temperature IS NOT NULL
+-- Retain other metrics even when temperature is unavailable.

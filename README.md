@@ -157,9 +157,21 @@ flowchart TD
 
 The fact grain remains one forecast snapshot × forecast date × Day/Night period × forecast location, linked to a mapped station and observations when available. Dimensions are `dim_date`, `dim_period`, `dim_forecast_location`, `dim_station` and `dim_weather_phenomenon`. `int_latest_forecasts` retains its existing name and preserves snapshots rather than filtering to a single latest forecast.
 
-The fact includes forecast/observed temperatures, signed and absolute error, source file, retrieval timestamp and `collected_before_period`. For prospective accuracy queries, filter `collected_before_period = true` and `observed_temperature IS NOT NULL`. The implemented fact does not yet contain the planned precipitation or phenomenon-match KPI measures; analytical queries/results remain the team’s separate reporting task.
+The fact includes temperature errors, precipitation occurrence indicators and `phenomenon_match`, plus separate observation counts and eligibility flags for all three KPIs. Forecast phenomena come from the individual forecast location. `retrieved_at` is PostgreSQL `TIMESTAMPTZ`, parsed explicitly as UTC; `dim_date.season` is `TEXT` with meteorological seasons. The fact grain is unchanged.
 
-Day is assumed to be 06:00–18:00 and Night the preceding 18:00–06:00, in Estonian local time. These are project assumptions, not verified official forecast-period definitions. The historical source supplies hourly temperature samples, matching the live sample approach; it does not add within-hour maximum/minimum metrics. The existing aggregation does not enforce twelve-hour coverage. The existing local-time interface also collapses the repeated clock hour at the autumn DST change. These limitations should accompany the reported results.
+| KPI | Definition | Eligible rows |
+|---|---|---|
+| Temperature MAE | Sum of `absolute_error` / number of eligible rows | `is_temperature_eligible = true` |
+| Precipitation occurrence accuracy | 100 × eligible rows with `precipitation_match = true` / all eligible rows | `is_precipitation_eligible = true` |
+| Phenomenon accuracy | 100 × eligible rows with `phenomenon_match = true` / all eligible rows | `is_phenomenon_eligible = true` |
+
+If there are no eligible rows, the KPI is undefined (null). Every eligible comparison requires a forecast collected before the period starts, a completed period, a mapped station and complete coverage for that metric. Expected coverage is the number of UTC hours between local period boundaries: normally 12, but 11 or 13 for daylight-saving transition nights. Unknown amounts/descriptions remain null and are excluded from that metric's denominator; a known incorrect prediction remains eligible and counts as a mismatch. Ineligible error and match fields are null.
+
+Precipitation is summed over its measurement intervals: the value reported at 18:00 covers the preceding hour and closes the Day period. Temperature and phenomenon use the hourly point samples. The observed phenomenon category is the most frequent recognised category over the period, independently of the temperature extreme. Category ties use alphabetical order; the representative description within the winning category uses frequency, then alphabetical order. Matching uses broad standardised categories, not exact wording. Unclassified `Other` values do not establish weather/precipitation eligibility. Missing precipitation and phenomena at Kuressaare linn therefore do not become dry weather or successful matches.
+
+The combined observations are materialised in Silver once per refresh. Their UTC hour key preserves both occurrences of the repeated autumn clock hour. The historical JSON source supplies temperature only; precipitation and phenomena remain sourced from XML. Analytical query files and results are maintained separately by the team.
+
+Day is assumed to be 06:00–18:00 and Night the preceding 18:00–06:00, in Estonian local time. These are project assumptions, not verified official forecast-period definitions. The historical source supplies hourly temperature samples, matching the live sample approach; it does not add within-hour maximum/minimum metrics. Only periods with all expected hourly samples are eligible for each metric. Hourly temperature samples still do not capture extrema occurring between samples; this limitation should accompany the reported results.
 
 ### Manual dbt commands
 
@@ -174,6 +186,16 @@ docker compose run --rm --service-ports -p 8081:8081 dbt \
 ```
 
 Open http://localhost:8081/ for the dbt catalog and lineage graph. Avoid running manual dbt commands while scheduled DAGs are refreshing the warehouse: the advisory lock is applied by `refresh_warehouse.py`. Generated artifacts are in `dbt/weather_transformations/target/` and excluded by the existing dbt `.gitignore`.
+
+### Warehouse schema DDL
+
+`sql/warehouse_schema.sql` is a generated schema-only snapshot of the actual warehouse. It excludes Airflow metadata tables. dbt models remain the source for transformations; do not maintain a second handwritten Gold schema.
+
+A successful Airflow refresh writes the current export to `dbt/weather_transformations/target/warehouse_schema.sql`. To update the committed snapshot from a running warehouse:
+
+```bash
+bash scripts/export_schema.sh
+```
 
 The correctly named profile is `dbt/profiles.yml`. The original `dbt/profiles` is retained unchanged for reference and is not read by dbt.
 

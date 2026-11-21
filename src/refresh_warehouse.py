@@ -36,7 +36,12 @@ def main():
                 # models and runs tests. Nonzero exit codes fail the Airflow task.
                 subprocess.run([dbt, "build", *flags], check=True)
                 subprocess.run([dbt, "docs", "generate", *flags], check=True)
-                print("Bronze loaded; dbt build, tests and documentation succeeded", flush=True)
+                subprocess.run(
+                    [sys.executable, str(Path(__file__).with_name("export_warehouse_schema.py")),
+                     "--output", str(Path(project) / "target" / "warehouse_schema.sql")],
+                    check=True,
+                )
+                print("Bronze, dbt models/tests, documentation and schema export succeeded", flush=True)
             finally:
                 cursor.execute("SELECT pg_advisory_unlock(20261121, 12)")
 

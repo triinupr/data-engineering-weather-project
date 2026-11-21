@@ -32,7 +32,7 @@ class RefreshTests(unittest.TestCase):
         self.assertEqual(cursor.execute.call_args, call("SELECT pg_advisory_unlock(20261121, 12)"))
         connection.close.assert_called_once()
 
-    def test_lock_covers_load_build_and_docs(self):
+    def test_lock_covers_load_build_docs_and_schema_export(self):
         from unittest.mock import MagicMock
         driver = MagicMock()
         runner = self.load_runner(driver)
@@ -42,9 +42,10 @@ class RefreshTests(unittest.TestCase):
             self.assertTrue(kwargs["check"])
         with patch.object(runner.subprocess, "run", side_effect=check_locked) as run:
             runner.main()
-        self.assertEqual(run.call_count, 3)
+        self.assertEqual(run.call_count, 4)
         self.assertIn("build", run.call_args_list[1].args[0])
         self.assertIn("generate", run.call_args_list[2].args[0])
+        self.assertTrue(run.call_args_list[3].args[0][1].endswith("export_warehouse_schema.py"))
 
 
 if __name__ == "__main__":

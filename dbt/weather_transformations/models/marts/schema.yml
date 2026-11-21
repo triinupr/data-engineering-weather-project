@@ -1,219 +1,242 @@
 version: 2
-
 models:
-  - name: fact_forecast_accuracy
-    description: >
-      Compares weather forecast snapshots with observed weather
-      conditions for each date, location and day/night period.
+- name: fact_forecast_accuracy
+  description: 'Compares weather forecast snapshots with observed weather conditions for each date, location and
+    day/night period.
 
-    columns:
-      - name: accuracy_key
-        description: "Unique identifier for each forecast accuracy record."
-        data_tests:
-          - unique
-          - not_null
+    '
+  columns:
+  - name: accuracy_key
+    description: Unique identifier for each forecast accuracy record.
+    data_tests:
+    - unique
+    - not_null
+  - name: date_key
+    description: Foreign key referencing dim_date.
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('dim_date')
+          field: date_key
+  - name: period_key
+    description: Foreign key referencing dim_period.
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('dim_period')
+          field: period_key
+  - name: location_key
+    description: Foreign key referencing dim_forecast_location.
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('dim_forecast_location')
+          field: location_key
+  - name: station_key
+    description: Foreign key referencing dim_station.
+    data_tests:
+    - relationships:
+        arguments:
+          to: ref('dim_station')
+          field: station_key
+  - name: forecast_phenomenon_key
+    description: Foreign key referencing the forecast phenomenon in dim_weather_phenomenon.
+    data_tests:
+    - relationships:
+        arguments:
+          to: ref('dim_weather_phenomenon')
+          field: phenomenon_key
+  - name: observed_phenomenon_key
+    description: Foreign key referencing the observed phenomenon in dim_weather_phenomenon.
+    data_tests:
+    - relationships:
+        arguments:
+          to: ref('dim_weather_phenomenon')
+          field: phenomenon_key
+  - name: retrieved_at
+    description: Actual forecast retrieval instant from the UTC filename, stored as PostgreSQL TIMESTAMPTZ.
+    data_tests:
+    - not_null
+  - name: source_file
+    description: Name of the XML file containing the forecast snapshot.
+  - name: collected_before_period
+    description: 'Indicates whether the forecast was collected before the start of its corresponding observation
+      period. Uses the assumed local observation periods: Day 06:00–18:00 and Night 18:00–06:00. TRUE means the
+      forecast was collected before the observation period started.
 
-      - name: date_key
-        description: "Foreign key referencing dim_date."
-        data_tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('dim_date')
-                field: date_key
+      '
+    data_tests:
+    - not_null
+  - name: forecast_temperature
+    description: Forecast maximum temperature for Day or minimum temperature for Night, in degrees Celsius.
+  - name: observed_temperature
+    description: Period maximum (Day) or minimum (Night), only when every expected UTC hour has a temperature; otherwise
+      null.
+  - name: temperature_error
+    description: Forecast minus observed temperature for eligible comparisons only; null for incomplete, late or
+      unfinished comparisons.
+  - name: absolute_error
+    description: Absolute temperature error for eligible comparisons only; nulls are excluded from MAE.
+  - name: observed_precipitation_mm
+    description: Sum of preceding-hour amounts aligned to the forecast period; null unless precipitation coverage
+      is complete.
+  - name: forecast_has_precipitation
+    description: Precipitation occurrence derived from the location-specific forecast phenomenon; unknown classifications
+      are null.
+  - name: observed_has_precipitation
+    description: Whether the complete observed period has more than zero millimetres; missing coverage stays null.
+  - name: precipitation_match
+    description: Forecast/observed precipitation agreement for eligible comparisons only; otherwise null.
+  - name: phenomenon_match
+    description: Equality of forecast and dominant observed standardised categories for eligible comparisons only;
+      otherwise null.
+  - name: observation_count
+    description: Count of distinct UTC hours containing temperature observations.
+    data_tests:
+    - not_null
+  - name: precipitation_observation_count
+    description: Count of distinct precipitation intervals with known amounts.
+    data_tests:
+    - not_null
+  - name: phenomenon_observation_count
+    description: Count of distinct UTC hours containing a recognised phenomenon category.
+    data_tests:
+    - not_null
+  - name: expected_observation_count
+    description: 'Number of UTC hours between local period boundaries: normally 12, with 11/13-hour DST nights.'
+    data_tests:
+    - not_null
+  - name: period_start_utc
+    description: 'Timezone-aware start: Day 06:00 local, Night 18:00 on the preceding local date.'
+    data_tests:
+    - not_null
+  - name: period_end_utc
+    description: 'Timezone-aware end: Day 18:00 local, Night 06:00 local.'
+    data_tests:
+    - not_null
+  - name: is_temperature_eligible
+    description: True only for a completed period, prospective forecast, mapped station and complete valid temperature
+      coverage.
+    data_tests:
+    - not_null
+  - name: is_precipitation_eligible
+    description: True only for a completed period, prospective forecast, mapped station, known forecast occurrence
+      and complete precipitation coverage.
+    data_tests:
+    - not_null
+  - name: is_phenomenon_eligible
+    description: True only for a completed period, prospective forecast, mapped station and complete recognised
+      phenomenon coverage.
+    data_tests:
+    - not_null
+- name: dim_date
+  description: Date dimension containing calendar attributes for forecast dates.
+  columns:
+  - name: date_key
+    description: Unique identifier for each date.
+    data_tests:
+    - unique
+    - not_null
+  - name: full_date
+    description: Full calendar date.
+  - name: year
+    description: Calendar year.
+  - name: month
+    description: Calendar month.
+  - name: day
+    description: Day of the month.
+  - name: quarter
+    description: Calendar quarter.
+  - name: day_of_week
+    description: Day of the week.
+  - name: season
+    description: 'Meteorological season as TEXT: Winter (Dec-Feb), Spring (Mar-May), Summer (Jun-Aug), Autumn (Sep-Nov).'
+    data_tests:
+    - not_null
+    - accepted_values:
+        arguments:
+          values:
+          - Winter
+          - Spring
+          - Summer
+          - Autumn
+- name: dim_period
+  description: Dimension identifying whether a weather forecast refers to Day or Night.
+  columns:
+  - name: period_key
+    description: Unique identifier for each forecast period.
+    data_tests:
+    - unique
+    - not_null
+  - name: period_name
+    description: 'Forecast period: Day or Night.'
+    data_tests:
+    - not_null
+    - accepted_values:
+        arguments:
+          values:
+          - Day
+          - Night
+- name: dim_forecast_location
+  description: Dimension containing locations for which weather forecasts are available.
+  columns:
+  - name: location_key
+    description: Unique identifier for each forecast location.
+    data_tests:
+    - unique
+    - not_null
+  - name: location_name
+    description: Name of the forecast location.
+    data_tests:
+    - unique
+    - not_null
+- name: dim_station
+  description: 'Weather station dimension with station identifiers and fields intended for SCD Type 2 history tracking.
 
-      - name: period_key
-        description: "Foreign key referencing dim_period."
-        data_tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('dim_period')
-                field: period_key
+    '
+  columns:
+  - name: station_key
+    description: Unique surrogate key for each station record.
+    data_tests:
+    - unique
+    - not_null
+  - name: station_name
+    description: Name of the weather observation station.
+    data_tests:
+    - not_null
+  - name: wmo_code
+    description: World Meteorological Organization station identifier, if available.
+  - name: valid_from
+    description: Start date of the station record's validity period.
+  - name: valid_to
+    description: End date of the station record's validity period.
+  - name: is_current
+    description: Indicates whether the station record is currently active.
+    data_tests:
+    - not_null
+- name: dim_weather_phenomenon
+  description: 'Dimension containing weather phenomena from forecasts and observations, including their classifications.
 
-      - name: location_key
-        description: "Foreign key referencing dim_forecast_location."
-        data_tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('dim_forecast_location')
-                field: location_key
-
-      - name: station_key
-        description: "Foreign key referencing dim_station."
-        data_tests:
-          - relationships:
-              arguments:
-                to: ref('dim_station')
-                field: station_key
-
-      - name: forecast_phenomenon_key
-        description: "Foreign key referencing the forecast phenomenon in dim_weather_phenomenon."
-        data_tests:
-          - relationships:
-              arguments:
-                to: ref('dim_weather_phenomenon')
-                field: phenomenon_key
-
-      - name: observed_phenomenon_key
-        description: "Foreign key referencing the observed phenomenon in dim_weather_phenomenon."
-        data_tests:
-          - relationships:
-              arguments:
-                to: ref('dim_weather_phenomenon')
-                field: phenomenon_key
-
-      - name: retrieved_at
-        description: "Forecast collection timestamp in UTC, extracted from the source filename."
-
-      - name: source_file
-        description: "Name of the XML file containing the forecast snapshot."
-
-      - name: collected_before_period
-        description: >
-          Indicates whether the forecast was collected before
-          the start of its corresponding observation period.
-          Uses the assumed local observation periods:
-          Day 06:00–18:00 and Night 18:00–06:00.
-          TRUE means the forecast was collected before the
-          observation period started.
-        data_tests:
-          - not_null
-
-      - name: forecast_temperature
-        description: "Forecast maximum temperature for Day or minimum temperature for Night, in degrees Celsius."
-
-      - name: observed_temperature
-        description: "Observed maximum temperature for Day or minimum temperature for Night, in degrees Celsius."
-
-      - name: temperature_error
-        description: "Forecast temperature minus observed temperature, in degrees Celsius."
-
-      - name: absolute_error
-        description: "Absolute difference between forecast and observed temperature, in degrees Celsius."
-
-  - name: dim_date
-    description: "Date dimension containing calendar attributes for forecast dates."
-
-    columns:
-      - name: date_key
-        description: "Unique identifier for each date."
-        data_tests:
-          - unique
-          - not_null
-
-      - name: full_date
-        description: "Full calendar date."
-
-      - name: year
-        description: "Calendar year."
-
-      - name: month
-        description: "Calendar month."
-
-      - name: day
-        description: "Day of the month."
-
-      - name: quarter
-        description: "Calendar quarter."
-
-      - name: day_of_week
-        description: "Day of the week."
-
-  - name: dim_period
-    description: "Dimension identifying whether a weather forecast refers to Day or Night."
-
-    columns:
-      - name: period_key
-        description: "Unique identifier for each forecast period."
-        data_tests:
-          - unique
-          - not_null
-
-      - name: period_name
-        description: "Forecast period: Day or Night."
-        data_tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: ['Day', 'Night']
-
-  - name: dim_forecast_location
-    description: "Dimension containing locations for which weather forecasts are available."
-
-    columns:
-      - name: location_key
-        description: "Unique identifier for each forecast location."
-        data_tests:
-          - unique
-          - not_null
-
-      - name: location_name
-        description: "Name of the forecast location."
-        data_tests:
-          - unique
-          - not_null
-
-  - name: dim_station
-    description: >
-      Weather station dimension with station identifiers
-      and fields intended for SCD Type 2 history tracking.
-
-    columns:
-      - name: station_key
-        description: "Unique surrogate key for each station record."
-        data_tests:
-          - unique
-          - not_null
-
-      - name: station_name
-        description: "Name of the weather observation station."
-        data_tests:
-          - not_null
-
-      - name: wmo_code
-        description: "World Meteorological Organization station identifier, if available."
-
-      - name: valid_from
-        description: "Start date of the station record's validity period."
-
-      - name: valid_to
-        description: "End date of the station record's validity period."
-
-      - name: is_current
-        description: "Indicates whether the station record is currently active."
-        data_tests:
-          - not_null
-
-  - name: dim_weather_phenomenon
-    description: >
-      Dimension containing weather phenomena from forecasts
-      and observations, including their classifications.
-
-    columns:
-      - name: phenomenon_key
-        description: "Unique identifier for each weather phenomenon."
-        data_tests:
-          - unique
-          - not_null
-
-      - name: phenomenon_name
-        description: "Name of the weather phenomenon."
-        data_tests:
-          - unique
-          - not_null
-
-      - name: category
-        description: "General weather phenomenon category."
-
-      - name: has_precipitation
-        description: "Indicates whether the phenomenon involves precipitation."
-        data_tests:
-          - not_null
-
-      - name: precipitation_type
-        description: "Type of precipitation, if applicable."
-
-      - name: intensity
-        description: "Intensity of the weather phenomenon, if applicable."
+    '
+  columns:
+  - name: phenomenon_key
+    description: Unique identifier for each weather phenomenon.
+    data_tests:
+    - unique
+    - not_null
+  - name: phenomenon_name
+    description: Name of the weather phenomenon.
+    data_tests:
+    - unique
+    - not_null
+  - name: category
+    description: General weather phenomenon category.
+  - name: has_precipitation
+    description: True for Rain/Snow or sleet/Hail; false for known dry categories; null for unclassified phenomena.
+  - name: precipitation_type
+    description: Type of precipitation, if applicable.
+  - name: intensity
+    description: Intensity of the weather phenomenon, if applicable.

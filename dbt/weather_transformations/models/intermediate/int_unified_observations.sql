@@ -1,40 +1,35 @@
-{{ config(materialized='view', schema='silver') }}
+{{ config(materialized='table', schema='silver') }}
 
--- Preserve the existing model's local-time interface. Collapse repeated live
--- responses within an hour before combining them with validated JSON data.
+-- Materialise once per refresh rather than parsing XML for every downstream
+-- test/query. UTC keys preserve both clock hours at the autumn DST change.
 with live_ranked as (
-    select *, row_number() over (
-        partition by station_name, date_trunc('hour', observation_datetime)
-        order by observation_datetime desc, file_name desc
-    ) as hour_rank
+    select *, date_trunc('hour', observation_timestamp_utc, 'UTC') as observation_hour_utc,
+        row_number() over (
+            partition by station_name, date_trunc('hour', observation_timestamp_utc, 'UTC')
+            order by observation_timestamp_utc desc, file_name desc
+        ) as hour_rank
     from {{ ref('stg_observations') }}
-    where temperature is not null
 ),
-live as (
-    select * from live_ranked where hour_rank = 1
-),
+live as (select * from live_ranked where hour_rank = 1),
 historical_ranked as (
     select *, row_number() over (
-        partition by station_name, date_trunc('hour', observation_datetime)
-        order by observation_timestamp_utc desc, source_updated_at desc nulls last,
-                 source_file desc
+        partition by station_name, observation_timestamp_utc
+        order by source_updated_at desc nulls last, source_file desc
     ) as hour_rank
     from {{ ref('stg_historical_observations') }}
     where temperature is not null
 ),
-historical as (
-    select * from historical_ranked where hour_rank = 1
-)
-select
-    coalesce(h.station_name, l.station_name) as station_name,
-    coalesce(h.observation_datetime, date_trunc('hour', l.observation_datetime)) as observation_datetime,
+historical as (select * from historical_ranked where hour_rank = 1)
+select coalesce(h.station_name, l.station_name) as station_name,
+    coalesce(h.observation_timestamp_utc, l.observation_hour_utc) as observation_timestamp_utc,
+    coalesce(h.observation_timestamp_utc, l.observation_hour_utc)
+        at time zone 'Europe/Tallinn' as observation_datetime,
     coalesce(h.temperature, l.temperature) as temperature,
-    -- The JSON TA metric has no phenomenon field. Retain the live value when
-    -- present; otherwise keep it null rather than inventing a condition.
-    l.phenomenon_name,
-    case when h.station_name is not null then 'historical_json' else 'live_xml' end as observation_source,
+    l.phenomenon_name, l.precipitation_mm,
+    case when h.station_name is not null then 'historical_json' else 'live_xml' end
+        as observation_source,
     coalesce(h.source_file, l.file_name) as source_file
 from historical h
 full outer join live l
     on h.station_name = l.station_name
-   and h.observation_datetime = date_trunc('hour', l.observation_datetime)
+   and h.observation_timestamp_utc = l.observation_hour_utc

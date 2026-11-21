@@ -1,0 +1,3 @@
+select 1::bigint as id, 'observations_20240101T040500Z.xml'::varchar as file_name,
+    '2024-01-01T04:05:00Z'::timestamptz as retrieved_at,
+    ('<observations timestamp="' || extract(epoch from '2024-01-01T04:05:00Z'::timestamptz)::bigint || '"><station><name>Wet</name><airtemperature></airtemperature><phenomenon>Light rain</phenomenon><precipitations>0.5</precipitations></station><station><name>Dry</name><airtemperature>8</airtemperature><phenomenon>Clear</phenomenon><precipitations>0</precipitations></station><station><name>Unknown</name><airtemperature>8</airtemperature><phenomenon></phenomenon><precipitations></precipitations></station></observations>')::xml as raw_payload
