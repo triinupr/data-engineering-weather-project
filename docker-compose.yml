@@ -6,10 +6,20 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    DBT_PROJECT_DIR: /app/dbt/weather_transformations
+    DBT_PROFILES_DIR: /app/dbt
+    DBT_BIN: /opt/airflow/dbt-venv/bin/dbt
+    POSTGRES_CONN_STR: postgresql://airflow:airflow@postgres:5432/airflow
+    DBT_HOST: postgres
+    DBT_PORT: "5432"
+    DBT_USER: airflow
+    DBT_PASSWORD: airflow
+    DBT_DATABASE: airflow
   volumes:
     - ./dags:/opt/airflow/dags
     - ./src:/app/src:ro
+    - ./dbt:/app/dbt
     - ./data:/app/data
     - airflow_logs:/opt/airflow/logs
   depends_on:
@@ -17,6 +27,25 @@ x-airflow-common: &airflow-common
       condition: service_healthy
 
 services:
+  dbt:
+    build:
+      context: .
+      dockerfile: Dockerfile.dbt
+    working_dir: /app/dbt
+    volumes:
+      - ./dbt:/app/dbt
+    environment:
+      DBT_PROFILES_DIR: /app/dbt
+      DBT_HOST: postgres
+      DBT_PORT: "5432"
+      DBT_USER: airflow
+      DBT_PASSWORD: airflow
+      DBT_DATABASE: airflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: [tools]
+
   ingestion:
     build: .
     volumes:
@@ -42,14 +71,16 @@ services:
     command:
       - -c
       - |
-        airflow db migrate &&
+        set -e
+        airflow db migrate
+
         airflow users create \
           --username admin \
           --password admin \
           --firstname Data \
           --lastname Engineering \
           --role Admin \
-          --email admin@example.com || true
+          --email admin@example.com || airflow users list | grep -w admin
     restart: "no"
 
   airflow-webserver:

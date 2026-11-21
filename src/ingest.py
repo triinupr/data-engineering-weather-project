@@ -3,6 +3,9 @@ from datetime import datetime, timezone
 import argparse
 import json
 import os
+import re
+import tempfile
+import xml.etree.ElementTree as ET
 import requests
 
 FORECAST_URL = "https://ilmateenistus.ee/ilma_andmed/xml/forecast.php?lang=eng"
@@ -33,7 +36,8 @@ def validate_xml_data_quality(data: bytes, dataset_type: str):
         if not stations:
             raise ValueError("Data Quality Failed: Zero station elements found in observations XML")
 
-        seen_stations = set()
+        seen_stations = {}
+        exact_duplicates = 0
         null_temp_count = 0
 
         for station in stations:
@@ -46,9 +50,16 @@ def validate_xml_data_quality(data: bytes, dataset_type: str):
 
             # Duplicate check within payload
             clean_name = name.strip()
-            if clean_name in seen_stations:
-                raise ValueError(f"Data Quality Failed: Duplicate observation station entry '{clean_name}'")
-            seen_stations.add(clean_name)
+            longitude = (station.findtext("longitude") or "").strip()
+            latitude = (station.findtext("latitude") or "").strip()
+            station_identity = (clean_name, longitude, latitude)
+            signature = tuple((child.tag, (child.text or "").strip()) for child in station)
+            if station_identity in seen_stations:
+                if seen_stations[station_identity] != signature:
+                    raise ValueError(f"Data Quality Failed: Conflicting duplicate station '{clean_name}'")
+                exact_duplicates += 1
+                continue
+            seen_stations[station_identity] = signature
 
             # Temperature range check
             if temp_str is not None and temp_str.strip() != "":
@@ -61,7 +72,7 @@ def validate_xml_data_quality(data: bytes, dataset_type: str):
             else:
                 null_temp_count += 1
 
-        print(f"Data Quality Passed: {len(stations)} observation stations validated ({null_temp_count} null temps)")
+        print(f"Data Quality Passed: {len(stations)} observation stations validated ({null_temp_count} null temps; {exact_duplicates} identical duplicate records retained in raw)")
 
     elif dataset_type == "forecast":
         forecasts = root.findall(".//forecast")
@@ -79,94 +90,135 @@ def fetch_xml(url: str) -> bytes:
     return data
 
 
-def save_bytes(data: bytes, dataset: str, extension: str, run_date: str = None) -> Path:
-    """
-    Idempotent file saver:
-    - If run_date is provided (e.g. from Airflow parameter), uses deterministic filename.
-    - Overwrites existing files for the same run_date instead of creating duplicates.
-    """
-    if run_date:
-        filename = f"{dataset}_{run_date}.{extension}"
-    else:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        filename = f"{dataset}_{timestamp}.{extension}"
+def existing_run_file(dataset: str, extension: str, run_date: str = None):
+    if not run_date:
+        return None
+    if not re.fullmatch(r"[0-9TtZz:_-]+", run_date):
+        raise ValueError("Run date must contain only date/time characters")
+    directory = RAW_DATA_DIR / dataset
+    matches = sorted(directory.glob(f"{dataset}_*_run_{run_date}.{extension}"))
+    legacy = directory / f"{dataset}_{run_date}.{extension}"
+    return matches[0] if matches else (legacy if legacy.exists() else None)
 
+
+def save_bytes(data: bytes, dataset: str, extension: str, run_date: str = None) -> Path:
+    existing = existing_run_file(dataset, extension, run_date)
+    if existing:
+        return existing
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_suffix = f"_run_{run_date}" if run_date else ""
     output_dir = RAW_DATA_DIR / dataset
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_file = output_dir / filename
-    
-    # Overwrites cleanly for idempotency
-    output_file.write_bytes(data)
+    output_file = output_dir / f"{dataset}_{timestamp}{run_suffix}.{extension}"
+    if output_file.exists():
+        return output_file
+    # Publish only complete files: Bronze never sees a partially written XML.
+    with tempfile.NamedTemporaryFile(dir=output_dir, suffix=".tmp", delete=False) as f:
+        temporary = Path(f.name)
+        f.write(data)
+    try:
+        temporary.chmod(0o644)
+        temporary.replace(output_file)
+    finally:
+        temporary.unlink(missing_ok=True)
     return output_file
 
 
 def ingest_forecast(run_date: str = None):
+    existing = existing_run_file("forecasts", "xml", run_date)
+    if existing:
+        print(f"Reusing {existing}")
+        return
     data = fetch_xml(FORECAST_URL)
     validate_xml_data_quality(data, "forecast")
     output_file = save_bytes(data, "forecasts", "xml", run_date=run_date)
-    print(f"Forecast saved cleanly to {output_file}")
+    print(f"Forecast saved to {output_file}")
 
 
 def ingest_observations(run_date: str = None):
+    existing = existing_run_file("observations", "xml", run_date)
+    if existing:
+        print(f"Reusing {existing}")
+        return
     data = fetch_xml(OBSERVATIONS_URL)
     validate_xml_data_quality(data, "observations")
     output_file = save_bytes(data, "observations", "xml", run_date=run_date)
-    print(f"Observations saved cleanly to {output_file}")
-    
-    
+    print(f"Observations saved to {output_file}")
 
-    
-def ingest_historical(year: int, month: int, overwrite: bool = True):
-     """Download one calendar month of validated hourly climate observations.
 
-    The official service limits response size, so this function retrieves the
-    month in pages and preserves each page as a separate raw JSON response.
-    """
+def validate_historical_page(payload, year: int, month: int):
+    if not isinstance(payload, list):
+        raise ValueError("Historical response must be a JSON array")
+    for row in payload:
+        if not isinstance(row, dict):
+            raise ValueError("Each historical record must be a JSON object")
+        for key in ("jaam_kood", "jaam_nimi", "element_kood"):
+            if not isinstance(row.get(key), str) or not row[key].strip():
+                raise ValueError(f"Missing historical identifier: {key}")
+        if row["element_kood"] != "TA":
+            raise ValueError("Expected the requested TA air-temperature metric")
+        for key in ("aasta", "kuu", "paev", "tund"):
+            if type(row.get(key)) is not int:
+                raise ValueError(f"Historical {key} must be an integer")
+        datetime(row["aasta"], row["kuu"], row["paev"], row["tund"], tzinfo=timezone.utc)
+        if (row["aasta"], row["kuu"]) != (year, month):
+            raise ValueError("Historical response contains a different requested month")
+        if "vaartus" not in row:
+            raise ValueError("Historical record is missing vaartus (JSON null is allowed)")
+        value = row["vaartus"]
+        if value is not None:
+            if isinstance(value, bool) or not (-50 <= float(value) <= 50):
+                raise ValueError(f"Historical temperature outside [-50, 50]: {value}")
+
+
+def ingest_historical(year: int, month: int):
+    """Fetch one month of UTC hourly TA records; publish only a complete batch."""
+    datetime(year, month, 1)
     params = {
         "aasta": f"eq.{year}",
         "kuu": f"eq.{month}",
-        "order": "jaam_kood.asc,element_kood.asc,paev.asc,tund.asc",
+        "element_kood": "eq.TA",
+        "order": "jaam_kood.asc,element_kood.asc,paev.asc,tund.asc,avaandmed_ts.asc",
     }
-    output_dir = RAW_DATA_DIR / "historical_observations" / f"{year}_{month:02d}"
-
-    # Handle idempotency cleanly on re-runs instead of crashing with FileExistsError
-    if output_dir.exists() and any(output_dir.glob("*.json")) and not overwrite:
-        print(f"{output_dir} already contains data. Skipping re-ingestion.")
-        return
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
+    parent = RAW_DATA_DIR / "historical_observations"
+    output_dir = parent / f"{year}_{month:02d}"
+    if output_dir.exists():
+        if any(output_dir.glob("*.json")):
+            print(f"Reusing archived month {output_dir}; no files overwritten")
+            return
+        output_dir.rmdir()
+    parent.mkdir(parents=True, exist_ok=True)
     page_size = 10000
-    offset = 0
-    page_number = 1
     total_rows = 0
-
-    while True:
-        headers = {"Range": f"{offset}-{offset + page_size - 1}"}
-        response = requests.get(
-            HISTORICAL_HOURLY_URL, params=params, headers=headers, timeout=120
-        )
-        response.raise_for_status()
-        try:
-            payload = response.json()
-        except requests.JSONDecodeError as exc:
-            raise ValueError("Historical response does not appear to be JSON") from exc
-
-        if not isinstance(payload, list):
-            raise ValueError("Historical response is not the expected JSON array")
-        if not payload:
-            break
-
-        output_file = output_dir / f"page_{page_number:04d}.json"
-        output_file.write_bytes(response.content)
-        total_rows += len(payload)
-        print(f"Saved {output_file} ({len(payload)} rows)")
-
-        if len(payload) < page_size:
-            break
-        offset += page_size
-        page_number += 1
-
+    # A failed request leaves no published month, so a retry cannot silently
+    # mistake the first few downloaded pages for a complete successful batch.
+    with tempfile.TemporaryDirectory(prefix=".historical-", dir=RAW_DATA_DIR) as temporary:
+        staging = Path(temporary) / "batch"
+        staging.mkdir()
+        page_number = 1
+        while True:
+            response = requests.get(
+                HISTORICAL_HOURLY_URL,
+                params={**params, "limit": page_size, "offset": (page_number - 1) * page_size},
+                headers={"Accept": "application/json", "Accept-Profile": "apijahialad"},
+                timeout=120,
+            )
+            response.raise_for_status()
+            try:
+                payload = response.json()
+            except requests.JSONDecodeError as exc:
+                raise ValueError("Historical response is not valid JSON") from exc
+            validate_historical_page(payload, year, month)
+            if not payload:
+                break
+            (staging / f"page_{page_number:04d}.json").write_bytes(response.content)
+            total_rows += len(payload)
+            if len(payload) < page_size:
+                break
+            page_number += 1
+        if not total_rows:
+            raise ValueError(f"No validated TA observations available for {year}-{month:02d}")
+        staging.rename(output_dir)
     print(f"Historical observations for {year}-{month:02d}: {total_rows} rows saved")
 
 

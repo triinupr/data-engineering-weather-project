@@ -9,7 +9,7 @@ SELECT
     END AS location_name,
     temperature,
     phenomenon_name
-FROM {{ ref('stg_observations') }}
+FROM {{ ref('int_unified_observations') }}
 WHERE station_name IN (
     'Tallinn-Harku',
     'Jõhvi',

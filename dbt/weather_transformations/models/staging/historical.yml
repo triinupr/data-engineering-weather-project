@@ -1,0 +1,50 @@
+version: 2
+
+sources:
+  - name: bronze
+    schema: bronze
+    tables:
+      - name: raw_historical_observations
+        description: "Unmodified paginated API response arrays stored as JSONB, one row per source file."
+
+models:
+  - name: stg_historical_observations
+    description: >
+      Validated hourly temperature metric (TA) extracted from Environment Portal
+      JSON arrays. Latest source revision wins per station code and UTC hour.
+      Extra JSON keys remain in Bronze; missing temperature stays null.
+    columns:
+      - name: station_code
+        description: "Environment Portal station identifier; not a WMO code."
+        data_tests: [not_null]
+      - name: station_name
+        description: "Station name, with Harku and Tõravere aliases normalised to live XML names."
+        data_tests: [not_null]
+      - name: observation_timestamp_utc
+        description: "Measurement timestamp built from aasta, kuu, paev and tund in UTC."
+        data_tests: [not_null]
+      - name: observation_datetime
+        description: "Measurement timestamp in Europe/Tallinn, matching the existing intermediate interface."
+      - name: temperature
+        description: "TA air temperature in Celsius; JSON null is kept as SQL null."
+      - name: source_updated_at
+        description: "Source revision timestamp avaandmed_ts, when supplied."
+      - name: source_file
+        description: "Bronze file identifier, including the historical month directory."
+        data_tests: [not_null]
+  - name: int_unified_observations
+    description: >
+      One row per station and local clock hour. Validated JSON temperatures take
+      priority over live temperatures; live phenomenon is retained when present.
+      The repeated local clock hour at the autumn DST transition is collapsed,
+      preserving the existing local-time model interface.
+    columns:
+      - name: observation_source
+        description: "Temperature provenance: historical_json or live_xml."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['historical_json', 'live_xml']
+      - name: source_file
+        description: "File supplying the selected temperature."
+        data_tests: [not_null]

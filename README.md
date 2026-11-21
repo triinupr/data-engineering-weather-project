@@ -1,404 +1,207 @@
 # Weather Forecast Accuracy – Data Engineering Project
 
-This project collects weather forecast and observation data from the Estonian Environment Agency for analysing weather forecast accuracy. It is a group project for the University of Tartu Data Engineering course.
+This University of Tartu group project compares Estonian weather forecasts with observations. Team: Gailin Savi, Eliise Ševtšenko, Karoliine Inselberg and Triinu Prants.
 
-## Team members
+The implementation uses Python, Airflow 2.10.5, PostgreSQL 16 and dbt Core 1.10.15 with dbt-postgres 1.9.1. dbt runs in an isolated Python environment inside Airflow, following the CLI orchestration approach in course practical `04_dbt`.
 
-- Gailin Savi
-- Eliise Ševtšenko
-- Karoliine Inselberg
-- Triinu Prants
+## Sources and layers
 
-## Data sources
+| Source | Acquisition | Purpose |
+|---|---|---|
+| Estonian Weather Service forecast XML | Daily at 13:00, Europe/Tallinn | Forecast snapshots |
+| Estonian Weather Service observations XML | Hourly at minute 5, Europe/Tallinn | Live station observations and station metadata |
+| Environment Portal `f_kliima_tund` JSON | Manually triggered, one calendar month | Validated hourly air temperatures, metric `TA` |
 
-- Estonian Weather Service live forecast XML
-- Estonian Weather Service live observations XML
-- Environment Portal validated historical hourly climate data
+Raw XML files and complete JSON response pages are archived under `data/raw/` and excluded from Git. `data/sample/` contains the two original XML examples. The historical JSON integration is described in [docs/extra_credit_b.md](docs/extra_credit_b.md).
 
-Raw source data is preserved before later parsing and transformation.
+| Layer | PostgreSQL location | Contents |
+|---|---|---|
+| Bronze | `bronze` | `raw_forecasts`, `raw_observations`, `raw_historical_observations` |
+| Silver | `public_silver` | XML staging views, JSON extraction and source reconciliation |
+| Intermediate | `public` | Existing forecast selection, station mapping and period aggregation views |
+| Gold | `public_gold` | `fact_forecast_accuracy` and five dimensions |
+| Station history | `snapshots` | `station_snapshot`, using the check strategy on WMO code |
 
-## Sample data
+The loader also creates empty `silver` and `gold` schemas. dbt uses its default schema naming convention, so its actual configured Silver/Gold models are in `public_silver` and `public_gold`.
 
-The repository contains example responses from the Estonian Environment
+PostgreSQL suits this small batch workload: it provides native XML/XPath and JSONB extraction, joins, window functions, transactions and dbt support in the existing Compose environment. File names uniquely identify Bronze payloads; repeated loading uses `ON CONFLICT DO NOTHING`. Gold tables are rebuilt on refresh, while the station snapshot retains versions. This supports repeated updates at the project’s scale; the Gold fact is not an incremental dbt model.
 
-Agency Weather Service under `data/sample/`.
-- `forecast_sample.xml` – example daily forecast XML response.
-- `observations_sample.xml` – example weather station observation XML response.
+## Setup
 
-These files demonstrate the structure of the source datasets and can be
-used for development and testing without retrieving new data.
-Continuously collected raw data is stored under `data/raw/` and is not
-committed to GitHub.
-
-## Requirements
-
-1. Install and run Docker Desktop.
-2. Install Git if it is not already installed.
-3. No local Python installation is required.
-
-## Initial setup
-
-Clone the repository and enter it:
-
-    git clone <REPOSITORY-URL>
-    cd data-engineering-weather-project
-
-Build the Docker images:
-
-    docker compose build
-
-## Manual live-ingestion test
-
-These commands are useful for checking that data retrieval works without Airflow.
-
-### Forecast
-
-    docker compose run --rm ingestion python src/ingest.py forecast
-
-The XML appears in:
-
-    data/raw/forecasts/
-
-### Observations
-
-    docker compose run --rm ingestion python src/ingest.py observations
-
-The XML appears in:
-
-    data/raw/observations/
-
-Verify the files:
-
-    ls data/raw/forecasts
-    ls data/raw/observations
-
-## Historical observations - one-time batch load
-
-Historical observations are a bootstrap dataset and are intentionally **not** an Airflow recurring task. The command uses the Environment Portal's official `f_kliima_tund` hourly climate-data service by default.
-
-The service has a response-size limit, so the script automatically downloads the selected month in pages and preserves each page as a separate raw JSON response.
-
-Download one month, for example September 2026:
-
-    docker compose run --rm ingestion python src/ingest.py historical --year 2026 --month 9
-
-The raw files appear under:
-
-    data/raw/historical_observations/2026_09/
-
-Repeat the command for each additional month that the project needs. Existing historical raw files are never overwritten.
-
-If the official service URL changes, it can be overridden explicitly:
-
-    docker compose run --rm -e HISTORICAL_OBSERVATIONS_URL=<URL> ingestion python src/ingest.py historical --year 2026 --month 9
-
-## Automatic data collection with Airflow
-
-Airflow runs two independent schedules:
-
-- observations: every hour at minute 5;
-- forecast: every day at 13:00 Estonia time (`Europe/Tallinn`).
-
-Historical observations are not scheduled.
-
-### 1. Make sure Docker Desktop is running
-
-Open Docker Desktop and wait until it reports that Docker is running.
-
-### 2. Build the images
-
-From the repository root:
-
-    docker compose build
-
-### 3. Initialize Airflow
-
-Run this once when setting up the project for the first time:
-
-    docker compose up airflow-init
-
-Wait until it finishes successfully and returns to the terminal prompt.
-
-### 4. Start automatic collection (postgreSQL, Airflow and pgAdmin in the backround)
-
-    docker compose up -d postgres airflow-webserver airflow-scheduler pgadmin
-
-
-Check that the services are running:
-
-    docker compose ps
-    
-Ensure container write permissions on the mounted `data/` volume (especially on Windows):
-
-    docker compose exec -u root airflow-webserver bash -c "mkdir -p /app/data/raw/forecasts /app/data/raw/observations /app/data/raw/historical_observations && chmod 
-
-* **Airflow Web UI:** [http://localhost:8080/](http://localhost:8080/) (`admin` / `admin`)
-* **pgAdmin Web UI:** [http://localhost:5051/](http://localhost:5051/) (`admin@example.com` / `admin`)
-
-### 5. Open Airflow
-
-Open this address in a browser:
-
-    http://localhost:8080
-
-Login for this local course environment:
-
-- username: `admin`
-- password: `admin`
-
-You should see:
-
-- `weather_observations_hourly`
-- `weather_forecast_daily`
-
-The DAGs are configured to be active when created. If either appears paused in the UI, switch it on.
-
-### 6. Check that collection works
-
-You can trigger either DAG manually from the Airflow UI instead of waiting for its next scheduled time.
-
-Then check:
-
-    ls data/raw/forecasts
-    ls data/raw/observations
-
-### 7. View status and logs
-
-Show container status:
-
-    docker compose ps
-
-Follow scheduler logs:
-
-    docker compose logs -f airflow-scheduler
-
-Follow webserver logs:
-
-    docker compose logs -f airflow-webserver
-
-Press `Ctrl+C` to stop following logs. This does not stop the containers.
-
-### 8. Stop automatic collection
-
-    docker compose down
-
-This stops the containers but does **not** delete the collected raw weather data or the named Airflow/PostgreSQL volumes.
-
-Do not use `docker compose down -v` unless you intentionally want to delete the Airflow/PostgreSQL state.
-
-## Important limitation of local scheduling
-
-Automatic collection only runs while the computer is on and Docker Desktop and the Airflow containers are running. If the laptop is asleep or switched off, the scheduled retrieval will not happen. `catchup` is disabled because a live XML endpoint cannot recreate a forecast or observation snapshot that was missed in the past.
-
-For reliable long-running collection, the same setup should eventually run on an always-on machine/server.
-
-## Raw-data directories
-
-    data/raw/forecasts/
-    data/raw/observations/
-    data/raw/historical_observations/
-
-Files under `data/raw/` are intentionally excluded from Git and should not be committed to GitHub.
-
-## Data Storage (PostgreSQL & Medallion Architecture)
-
-### Database Choice Rationale
-We selected **PostgreSQL (v16)** as the analytical data warehouse for this project for the following reasons:
-* **Native Semi-Structured Data Support:** The source APIs return raw payloads in both **XML** (forecasts and hourly observations) and **JSON** (historical observations). PostgreSQL natively supports `XML` and `JSONB` column types, allowing raw payloads to be stored unaltered in the Bronze layer and parsed directly in SQL/dbt using `xpath()` and JSONB functions.
-* **Medallion Architecture Separation:** PostgreSQL schemas cleanly separate data processing stages into `bronze` (raw payloads), `silver` (cleaned and parsed staging models), and `gold` (analytical star schema).
-* **Reliability & Ecosystem Integration:** PostgreSQL provides ACID-compliant transactions for idempotent batch loading (`ON CONFLICT DO NOTHING`) and integrates seamlessly with both **Apache Airflow** and **dbt** within a single Docker Compose stack.
-
-### Schema & Bronze Layer Structure
-The database (`airflow`) is organized into three schemas:
-* **`bronze`**: Stores raw, unmodified API responses along with ingestion metadata (`file_name`, `retrieved_at`).
-  * `bronze.raw_forecasts` (`raw_payload XML`) — weather forecast XML snapshots.
-  * `bronze.raw_observations` (`raw_payload XML`) — hourly station observation XML snapshots.
-  * `bronze.raw_historical_observations` (`raw_payload JSONB`) — paginated monthly historical climate JSON responses.
-* **`silver`**: Intermediate cleaned and structured models built via `dbt`.
-* **`gold`**: Final dimensional star schema (`Fact_ForecastAccuracy` and dimension tables) built via `dbt`.
-
-### Loading Raw Data into PostgreSQL
-Run the idempotent Bronze loader script to initialize the schemas/tables (if not yet created) and load all local files from `/app/data/raw/` into PostgreSQL:
+Install Git and Docker Desktop, and start Docker Desktop. No host Python installation is required for the Docker pipeline.
 
 ```bash
-docker compose exec airflow-webserver python /app/src/load_bronze.py
+git clone https://github.com/triinupr/data-engineering-weather-project.git
+cd data-engineering-weather-project
+mkdir -p data/raw/forecasts data/raw/observations data/raw/historical_observations
+docker compose --profile tools build
+docker compose up -d postgres
+docker compose run --rm airflow-init
+docker compose up -d airflow-webserver airflow-scheduler pgadmin
+docker compose ps
 ```
 
-Already loaded files are safely skipped based on their unique `file_name`.
+For an existing checkout, start at `mkdir` instead of cloning again. If Linux bind-mount ownership causes a permission error, set the `data/` and `dbt/` directories writable by the container Airflow user (UID 50000); avoid making the whole repository world writable.
 
----
+| Service | Address | Local course credentials |
+|---|---|---|
+| Airflow | http://localhost:8080/ | `admin` / `admin` |
+| pgAdmin | http://localhost:5051/ | `admin@example.com` / `admin` |
+| PostgreSQL, from containers | `postgres:5432`, database `airflow` | `airflow` / `airflow` |
 
-## Inspecting the Database (pgAdmin)
+These credentials are for the local course setup. In pgAdmin, register PostgreSQL with host `postgres`, port `5432` and the credentials above. PostgreSQL is not published to a host port.
 
-1. Open [http://localhost:5051/](http://localhost:5051/) and log in (`admin@example.com` / `admin`).
-2. Select **Object → Register → Server** and configure the connection:
-   * **General → Name:** `weather-db`
-   * **Connection → Host name/address:** `postgres`
-   * **Connection → Port:** `5432`
-   * **Connection → Maintenance database:** `airflow`
-   * **Connection → Username / Password:** `airflow` / `airflow`
-3. Open **Query Tool** on the `airflow` database to verify loaded row counts:
-   ```sql
-   SELECT 'raw_forecasts' AS table_name, COUNT(*) AS rows FROM bronze.raw_forecasts
-   UNION ALL
-   SELECT 'raw_observations', COUNT(*) FROM bronze.raw_observations
-   UNION ALL
-   SELECT 'raw_historical_observations', COUNT(*) FROM bronze.raw_historical_observations;
-   ```
+New recurring DAGs start paused, so saved data can be loaded and tested before enabling collection. The two manual DAGs start unpaused and have no automatic schedule, so explicit triggers can run immediately. Existing DAG pause state is stored in Airflow and is retained during upgrades.
 
-## Transformation (dbt)
+## Restore the supplied raw backup
 
-### Overview
-
-The Transformation layer is implemented using **dbt (data build tool)** and PostgreSQL. Its purpose is to transform raw weather forecast and observation data from the Bronze layer into structured tables suitable for analysing forecast accuracy.
-
-The transformation pipeline follows the Medallion Architecture:
-
-- **Bronze:** Raw XML weather forecasts and observations stored in PostgreSQL.
-- **Silver:** Parsed and cleaned weather data.
-- **Intermediate:** Prepared and aggregated data used by the final analytical models.
-- **Gold:** A dimensional star schema containing one fact table and five dimension tables.
-
-All transformations are defined as SQL models in the `dbt/weather_transformations/` directory. Dependencies between models are managed using dbt's `ref()` function.
-
-### Silver Layer
-
-The Silver layer contains two staging models:
-
-| Model | Description |
-|---|---|
-| `stg_forecasts` | Extracts and structures forecast information from the raw forecast XML data. |
-| `stg_observations` | Extracts and structures weather station measurements from the raw observation XML data. |
-
-### Intermediate Layer
-
-The intermediate layer contains three models:
-
-| Model | Description |
-|---|---|
-| `int_observations` | Prepares weather station observations for further processing. |
-| `int_daily_observations` | Aggregates observations into daily Day/Night periods for comparison with forecasts. |
-| `int_latest_forecasts` | Prepares forecast records for the analytical models. |
-
-For this project, daytime is defined as 06:00–18:00 and nighttime as 18:00–06:00 in Estonian local time. These are project-specific assumptions, as explained in the Assumptions section of this README.
-
-### Gold Layer – Star Schema
-
-The Gold layer contains the final analytical tables used for forecast accuracy analysis.
-
-**Fact table: `fact_forecast_accuracy`**
-
-This table combines weather forecasts with the corresponding weather station observations when available.
-
-Each row represents a weather forecast snapshot for a specific forecast date, Day/Night period and forecast location, linked to a mapped weather station and its aggregated observations when available.
-
-The fact table supports comparisons between forecasted and observed weather conditions.
-
-**Dimension tables:**
-
-| Dimension | Description |
-|---|---|
-| `dim_date` | Forecast dates and related date attributes. |
-| `dim_period` | Day and Night forecast periods. |
-| `dim_forecast_location` | Forecast locations. |
-| `dim_station` | Weather stations mapped to forecast locations. |
-| `dim_weather_phenomenon` | Weather phenomena included in the forecasts. |
-
-Together, the fact table and five dimensions form the analytical star schema.
-
-### Snapshot – Slowly Changing Dimension Type 2
-
-A dbt snapshot named `station_snapshot` is implemented to track changes in weather station information.
-
-The snapshot uses the dbt `check` strategy to detect changes in the `wmo_code` field.
-
-Snapshot history is used by `dim_station` to represent station records and their validity periods.
-
-### Data Quality Tests and Documentation
-
-Data quality tests are defined in the dbt project using YAML configuration files.
-
-The tests include checks for missing values, uniqueness and relationships between tables.
-
-During development, **31 dbt tests passed successfully**.
-
-Model and column documentation is provided in `models/marts/schema.yml`.
-
-### Running the Transformation Pipeline
-
-**The transformation models are not automatically executed by starting Docker Compose.**
-
-Before running dbt, PostgreSQL must be running and the Bronze tables must contain weather data.
-
-All commands below should be executed from the repository root directory.
-
-**Step 1 – Start the required services**
-
-If this is the first setup, follow the Docker build and Airflow initialization instructions earlier in this README.
-
-Start PostgreSQL and Airflow:
+The supplied `../data/raw/` directory contains the XML backup through 12 November 2026. Copy it into this repository before replaying:
 
 ```bash
-docker compose up -d postgres airflow-webserver airflow-scheduler pgadmin
+rsync -av ../data/raw/ data/raw/
 ```
 
-**Step 2 – Collect weather data**
+Keep the original backup. The supplied folder has 44 forecast XML files and 961 observation XML files; it does not contain historical JSON. Historical data must be downloaded separately for extra-credit evidence.
 
-If the local `data/raw/` directories are empty, retrieve forecast and observation data:
+Trigger `weather_rebuild_from_raw` from the Airflow UI, or test it directly:
 
 ```bash
-docker compose run --rm ingestion python src/ingest.py forecast
-docker compose run --rm ingestion python src/ingest.py observations
+docker compose exec airflow-scheduler airflow dags test weather_rebuild_from_raw 2026-11-21
 ```
 
-For meaningful forecast accuracy analysis, multiple forecast and observation snapshots are needed. A single collection run will not reproduce the historical dataset used during development.
+This loads Bronze, executes `dbt build` (snapshots, models and tests in dependency order), then generates dbt documentation. All three stages must succeed for the task to succeed.
 
-**Step 3 – Load raw data into PostgreSQL (Bronze)**
+## Airflow orchestration
+
+| DAG | Schedule | Task order |
+|---|---|---|
+| `weather_observations_hourly` | `5 * * * *`, Europe/Tallinn | `collect_observations` → `refresh_warehouse` |
+| `weather_forecast_daily` | `0 13 * * *`, Europe/Tallinn | `collect_forecast` → `refresh_warehouse` |
+| `weather_historical_month` | Manual; parameters `year`, `month` | `collect_historical_json` → `refresh_warehouse` |
+| `weather_rebuild_from_raw` | Manual; no API calls | `refresh_warehouse` |
+
+```mermaid
+flowchart TD
+    subgraph observations[weather_observations_hourly]
+        O[collect_observations] --> OR[refresh_warehouse]
+    end
+    subgraph forecasts[weather_forecast_daily]
+        F[collect_forecast] --> FR[refresh_warehouse]
+    end
+    subgraph historical[weather_historical_month]
+        H[collect_historical_json] --> HR[refresh_warehouse]
+    end
+    subgraph replay[weather_rebuild_from_raw]
+        RR[refresh_warehouse]
+    end
+```
+
+Each `refresh_warehouse` task calls `src/refresh_warehouse.py`. A PostgreSQL advisory lock serializes its entire Bronze load, dbt build and documentation generation across all four DAGs. This prevents concurrent snapshot updates and conflicting Gold table rebuilds. Each DAG allows one active run and retries failed tasks twice. DAGs use `catchup=False` because live endpoints provide current data and cannot recreate old forecasts.
+
+Enable the two live schedules after replay succeeds:
 
 ```bash
-docker compose exec airflow-webserver python /app/src/load_bronze.py
+docker compose exec airflow-scheduler airflow dags unpause weather_observations_hourly
+docker compose exec airflow-scheduler airflow dags unpause weather_forecast_daily
 ```
 
-This creates the necessary Bronze tables if they do not already exist and loads the locally available raw data. Previously loaded files are skipped.
+Live collection takes a date/time run identifier from Airflow. The actual UTC retrieval timestamp remains first in the filename, so Gailin’s forecast timestamp extraction still works. A retry reuses the saved file for that run identifier without fetching a different live response. Files are published atomically and not overwritten. A manual trigger of a live DAG collects current weather; it does not backfill the trigger’s historical date.
 
-**Step 4 – Run the dbt snapshot**
+## Historical JSON: extra-credit B
+
+In Airflow, trigger `weather_historical_month` with `year=2026`, `month=10`. October overlaps the saved forecast dataset, so historical measurements can contribute to forecast accuracy. September-only observations cannot by themselves demonstrate a forecast comparison with the October–November backup.
+
+Command-line alternative:
 
 ```bash
-docker compose run --rm dbt dbt snapshot --project-dir /app/dbt/weather_transformations
+docker compose exec airflow-scheduler airflow dags trigger weather_historical_month \
+  --conf '{"year":2026,"month":10}'
 ```
 
-This creates or updates the station snapshot used for tracking changes in station information.
+The ingestion script filters `TA` (hourly temperature), paginates the API, validates each record and saves the original JSON arrays. It publishes the month directory only after every page succeeds. Empty API responses fail with an explanatory error. Repeating an archived month reuses its files. Existing manually copied month directories are treated as complete archives, so copy complete months only. To ingest a revised version, preserve the original archive outside `data/raw/` before explicitly replacing it; the current loader does not update a payload already loaded under the same file name.
 
-**Step 5 – Run the dbt models**
+The existing Bronze loader stores JSON pages as JSONB. New dbt models expand response arrays, type selected fields, convert UTC timestamps to local time and select the latest source revision. At an overlapping station/hour, a non-null historical temperature takes priority; a live phenomenon is kept when available. The existing six-station mapping, period aggregation, dimensions and fact then consume the combined observations.
+
+Run the supporting evidence queries and save the actual output after the historical DAG succeeds:
 
 ```bash
-docker compose run --rm dbt dbt run --project-dir /app/dbt/weather_transformations
+mkdir -p results
+docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U airflow -d airflow \
+  < sql/extra_credit_b.sql > results/extra_credit_b.txt
 ```
 
-This executes the dbt models in dependency order and creates or updates the Silver, Intermediate and Gold tables.
+The fourth query must show a positive matched-forecast count to demonstrate JSON contributing to Gold. A successful build with zero historical files is useful for XML replay but does not substantiate the JSON extra-credit claim.
 
-**Step 6 – Run data quality tests**
+## dbt models and dependencies
+
+```mermaid
+flowchart TD
+    BXML[Bronze XML] --> SF[stg_forecasts]
+    BXML --> SO[stg_observations]
+    BXML --> SS[station_snapshot]
+    BJSON[Bronze JSONB] --> SH[stg_historical_observations]
+    SO --> U[int_unified_observations]
+    SH --> U
+    U --> IO[int_observations]
+    IO --> ID[int_daily_observations]
+    SF --> IF[int_latest_forecasts]
+    SF --> D[Date, period and location dimensions]
+    SS --> DS[dim_station]
+    BXML --> DP[dim_weather_phenomenon]
+    IF --> FACT[fact_forecast_accuracy]
+    ID --> FACT
+    D --> FACT
+    DS --> FACT
+    DP --> FACT
+```
+
+The fact grain remains one forecast snapshot × forecast date × Day/Night period × forecast location, linked to a mapped station and observations when available. Dimensions are `dim_date`, `dim_period`, `dim_forecast_location`, `dim_station` and `dim_weather_phenomenon`. `int_latest_forecasts` retains its existing name and preserves snapshots rather than filtering to a single latest forecast.
+
+The fact includes forecast/observed temperatures, signed and absolute error, source file, retrieval timestamp and `collected_before_period`. For prospective accuracy queries, filter `collected_before_period = true` and `observed_temperature IS NOT NULL`. The implemented fact does not yet contain the planned precipitation or phenomenon-match KPI measures; analytical queries/results remain the team’s separate reporting task.
+
+Day is assumed to be 06:00–18:00 and Night the preceding 18:00–06:00, in Estonian local time. These are project assumptions, not verified official forecast-period definitions. The historical source supplies hourly temperature samples, matching the live sample approach; it does not add within-hour maximum/minimum metrics. The existing aggregation does not enforce twelve-hour coverage. The existing local-time interface also collapses the repeated clock hour at the autumn DST change. These limitations should accompany the reported results.
+
+### Manual dbt commands
+
+Airflow normally runs the complete build. For diagnosis, use the separate tools service:
 
 ```bash
-docker compose run --rm dbt dbt test --project-dir /app/dbt/weather_transformations
+docker compose run --rm dbt dbt debug --project-dir /app/dbt/weather_transformations
+docker compose run --rm dbt dbt build --project-dir /app/dbt/weather_transformations
+docker compose run --rm dbt dbt docs generate --project-dir /app/dbt/weather_transformations
+docker compose run --rm --service-ports -p 8081:8081 dbt \
+  dbt docs serve --project-dir /app/dbt/weather_transformations --host 0.0.0.0 --port 8081
 ```
 
-The command checks whether the implemented data quality tests pass.
+Open http://localhost:8081/ for the dbt catalog and lineage graph. Avoid running manual dbt commands while scheduled DAGs are refreshing the warehouse: the advisory lock is applied by `refresh_warehouse.py`. Generated artifacts are in `dbt/weather_transformations/target/` and excluded by the existing dbt `.gitignore`.
 
-### Verifying the Results
+The correctly named profile is `dbt/profiles.yml`. The original `dbt/profiles` is retained unchanged for reference and is not read by dbt.
 
-The resulting tables can be inspected using pgAdmin at [http://localhost:5051/](http://localhost:5051/).
+## Configuration
 
-The final fact table and dimensions are available in the `public_gold` schema.
+| Variable | Default | Purpose |
+|---|---|---|
+| `RAW_DATA_DIR` | `/app/data/raw` | Ingestion and Bronze input directory |
+| `POSTGRES_CONN_STR` | `postgresql://airflow:airflow@postgres:5432/airflow` | Bronze loader and warehouse lock |
+| `DBT_PROJECT_DIR` | `/app/dbt/weather_transformations` | Project invoked by Airflow |
+| `DBT_PROFILES_DIR` | `/app/dbt` | Directory containing `profiles.yml` |
+| `DBT_BIN` | `/opt/airflow/dbt-venv/bin/dbt` | Isolated dbt executable in Airflow |
+| `DBT_HOST`, `DBT_PORT` | `postgres`, `5432` | dbt connection |
+| `DBT_USER`, `DBT_PASSWORD`, `DBT_DATABASE` | `airflow` | dbt connection credentials/database |
+| `HISTORICAL_OBSERVATIONS_URL` | `https://keskkonnaandmed.envir.ee/f_kliima_tund` | Historical JSON endpoint |
 
-For example, the following SQL query returns the number of rows in the fact table:
+Compose currently sets the local database values explicitly. For a different deployment, update the Compose environment consistently for PostgreSQL, Airflow metadata, the loader and dbt; setting only a host shell variable does not override a literal Compose value.
 
-```sql
-SELECT COUNT(*)
-FROM public_gold.fact_forecast_accuracy;
+## Verification
+
+Offline ingestion regression tests require Python 3.12 and `requests`:
+
+```bash
+python3 -m unittest discover -s tests -v
 ```
 
-### Assumptions for forecast accuracy calculations
-For this project, daytime is defined as 06:00–18:00 and nighttime as 18:00–06:00 (Estonian local time). The observed maximum temperature during the daytime period and minimum temperature during the nighttime period are compared with the corresponding forecast temperatures.
+With Docker running and the raw archive restored, test replay and idempotency:
 
-These time intervals are project-specific assumptions and have not been verified against the official definitions used by the Estonian Weather Service. Therefore, the calculated forecast errors should be interpreted within the scope of these assumptions rather than as official forecast accuracy measurements.
+```bash
+bash scripts/verify_pipeline.sh
+```
